@@ -26,6 +26,10 @@ import {
 import { saveNote } from './notesService';
 import { extractLocalMedical, addEntry as addMedEntry, checkUrgent } from './medicalMemory';
 import { logSecurityEvent } from './securityGateway';
+import { searchFiles } from './filesService';
+import { listEntries } from './knowledgeBase';
+import { scanContent, formatThreatReport } from './threatScanner';
+import { Linking } from 'react-native';
 import type { ToolAction } from './toolTypes';
 
 export type { ToolAction } from './toolTypes';
@@ -150,6 +154,117 @@ export async function executeTool(action: ToolAction): Promise<{ result: string;
         await saveNote(title, content);
         console.log('[Tool] Note saved:', title);
         return { result: `Note saved: "${title}"`, success: true };
+      }
+
+      // ── Run Code ─────────────────────────────────────────
+      case 'run_code': {
+        const code = (action.data as Record<string, string>)?.code;
+        if (!code) return { result: 'No code provided', success: false };
+        // Sandboxed execution — no access to require, fetch, global, process
+        try {
+          const sandbox = new Function(
+            'return (function() { "use strict"; ' +
+            'const require = undefined; const fetch = undefined; ' +
+            'const process = undefined; const global = undefined; ' +
+            `return (${code}); })()`,
+          );
+          const output = sandbox();
+          const resultStr = typeof output === 'object' ? JSON.stringify(output, null, 2) : String(output);
+          console.log('[Tool] Code executed, result:', resultStr.slice(0, 100));
+          return { result: `Result: ${resultStr}`, success: true };
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          return { result: `Code error: ${msg}`, success: false };
+        }
+      }
+
+      // ── Read File / Knowledge Base ────────────────────────
+      case 'read_file': {
+        const query = action.query || (action.data as Record<string, string>)?.query;
+        if (!query) return { result: 'No search query provided', success: false };
+        // Search knowledge base entries across all personas
+        const results = await searchFiles(query);
+        if (results.length === 0) {
+          // Try knowledge base
+          const allPersonas = ['atlas', 'vera', 'cipher', 'lumen', 'pete'];
+          const entries = [];
+          for (const pid of allPersonas) {
+            const pEntries = await listEntries(pid);
+            entries.push(...pEntries.filter(e =>
+              e.title.toLowerCase().includes(query.toLowerCase()) ||
+              e.content.toLowerCase().includes(query.toLowerCase())
+            ));
+          }
+          if (entries.length === 0) return { result: `No files or knowledge entries found for "${query}"`, success: false };
+          const formatted = entries.slice(0, 3).map(e => `${e.title}:\n${e.content.slice(0, 500)}`).join('\n\n---\n\n');
+          return { result: formatted, success: true };
+        }
+        const formatted = results.slice(0, 3).map(f => `${f.name}:\n${f.content?.slice(0, 500) || '(no content)'}`).join('\n\n---\n\n');
+        console.log('[Tool] File search:', query, results.length, 'results');
+        return { result: formatted, success: true };
+      }
+
+      // ── Open App ──────────────────────────────────────────
+      case 'open_app': {
+        const app = (action.data as Record<string, string>)?.app?.toLowerCase();
+        const data = (action.data as Record<string, string>)?.data || '';
+        if (!app) return { result: 'No app specified', success: false };
+
+        const urlSchemes: Record<string, string> = {
+          messages:  data ? `sms:${data}` : 'sms:',
+          mail:      data ? `mailto:${data}` : 'mailto:',
+          maps:      data ? `maps://?q=${encodeURIComponent(data)}` : 'maps://',
+          safari:    data || 'https://www.google.com',
+          settings:  'app-settings:',
+          phone:     data ? `tel:${data}` : 'tel:',
+          shortcuts: 'shortcuts://',
+          calendar:  'calshow://',
+          notes:     'mobilenotes://',
+          photos:    'photos-redirect://',
+          music:     'music://',
+          files:     'shareddocuments://',
+        };
+
+        const url = urlSchemes[app];
+        if (!url) return { result: `Unknown app: "${app}". Available: ${Object.keys(urlSchemes).join(', ')}`, success: false };
+
+        try {
+          const canOpen = await Linking.canOpenURL(url);
+          if (!canOpen) return { result: `Cannot open ${app} — URL scheme not supported on this device`, success: false };
+          await Linking.openURL(url);
+          console.log('[Tool] Opened app:', app, url);
+          return { result: `Opened ${app}`, success: true };
+        } catch (e) {
+          return { result: `Failed to open ${app}: ${e instanceof Error ? e.message : String(e)}`, success: false };
+        }
+      }
+
+      // ── Run Shortcut ──────────────────────────────────────
+      case 'run_shortcut': {
+        const name = (action.data as Record<string, string>)?.name;
+        if (!name) return { result: 'No shortcut name provided', success: false };
+        const input = (action.data as Record<string, string>)?.input || '';
+        const url = `shortcuts://run-shortcut?name=${encodeURIComponent(name)}${input ? `&input=text&text=${encodeURIComponent(input)}` : ''}`;
+        try {
+          const canOpen = await Linking.canOpenURL(url);
+          if (!canOpen) return { result: 'Shortcuts app not available', success: false };
+          await Linking.openURL(url);
+          console.log('[Tool] Running shortcut:', name);
+          return { result: `Running shortcut: "${name}"`, success: true };
+        } catch (e) {
+          return { result: `Failed to run shortcut: ${e instanceof Error ? e.message : String(e)}`, success: false };
+        }
+      }
+
+      // ── Scan Threat ───────────────────────────────────────
+      case 'scan_threat': {
+        const content = (action.data as Record<string, string>)?.content;
+        if (!content) return { result: 'No content to scan', success: false };
+        const type = ((action.data as Record<string, string>)?.type || 'email') as 'email' | 'link' | 'message' | 'file';
+        const report = scanContent(content, type);
+        const formatted = formatThreatReport(report);
+        console.log('[Tool] Threat scan:', report.level, report.indicators.length, 'indicators');
+        return { result: formatted, success: true };
       }
 
       default:

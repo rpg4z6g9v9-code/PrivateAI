@@ -11,6 +11,11 @@ export type ToolActionType =
   | 'check_calendar'
   | 'log_health'
   | 'save_note'
+  | 'run_code'
+  | 'read_file'
+  | 'open_app'
+  | 'run_shortcut'
+  | 'scan_threat'
   | 'web_search'       // legacy alias for search_web
   | 'memory_store'
   | 'memory_retrieve';
@@ -95,9 +100,62 @@ title: Meeting takeaways
 content: Decided to go with Swift for the native rewrite. Timeline is 6 weeks.
 [/TOOL]
 
+### run_code
+Execute a JavaScript snippet and return the result. Use for calculations, data transforms, or quick logic.
+Parameters:
+  code: JavaScript code to execute (required)
+Example:
+[TOOL: run_code]
+code: const fib = n => n <= 1 ? n : fib(n-1) + fib(n-2); fib(10)
+[/TOOL]
+
+### read_file
+Search and read content from the user's knowledge base.
+Parameters:
+  query: Search term to find relevant files/entries (required)
+Example:
+[TOOL: read_file]
+query: React Native architecture notes
+[/TOOL]
+
+### open_app
+Open another app on the user's phone via URL scheme.
+Parameters:
+  app: App name — "messages", "mail", "maps", "safari", "settings", "phone", "shortcuts" (required)
+  data: Optional data (e.g. URL for safari, address for maps, number for phone)
+Example:
+[TOOL: open_app]
+app: safari
+data: https://developer.apple.com
+[/TOOL]
+
+### run_shortcut
+Run an iOS Shortcut by name. The user must have the shortcut installed.
+Parameters:
+  name: Exact name of the iOS Shortcut (required)
+  input: Optional text input to pass to the shortcut
+Example:
+[TOOL: run_shortcut]
+name: Block Spam Sender
+input: spammer@fake-domain.com
+[/TOOL]
+
+### scan_threat
+Analyze pasted content (email, message, link) for security threats. Returns a threat assessment with severity, indicators found, and recommended actions.
+Parameters:
+  content: The suspicious content to analyze (required)
+  type: "email", "link", "message", or "file" (default: "email")
+Example:
+[TOOL: scan_threat]
+type: email
+content: Subject: URGENT: Your account has been compromised! Click here immediately to verify...
+[/TOOL]
+
 Rules:
 - Only call tools when they genuinely help the user
 - Never call log_health unless the user is describing actual health information
 - For set_goal, only save when the user expresses a clear intention or goal
+- For run_code, never execute code that accesses the file system, network, or device APIs
+- For scan_threat, always provide a clear threat level and actionable next steps
 - Always include the tool result naturally in your response — don't just dump raw output
 `;
