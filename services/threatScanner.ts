@@ -89,6 +89,35 @@ const DATA_LEAK_PATTERNS = [
   /\b(api[_-]?key|secret[_-]?key|access[_-]?token)\s*[:=]\s*\S+/i,
   /\b\d{3}-\d{2}-\d{4}\b/,                    // SSN format
   /\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/, // credit card format
+  /\b(sk-ant-api\d{2}-[A-Za-z0-9_-]{20,})\b/,  // Anthropic API key
+  /\b(sk-[A-Za-z0-9]{20,})\b/,                   // OpenAI API key
+  /\b(ghp_[A-Za-z0-9]{36,})\b/,                  // GitHub token
+  /\b(xox[bpras]-[A-Za-z0-9-]{10,})\b/,          // Slack token
+];
+
+// ─── Network/Protocol Attack Indicators ──────────────────────
+// From "How Hackers Think" — patterns that indicate network-level threats
+
+const NETWORK_ATTACK_PATTERNS = [
+  /\b(port\s*\d{2,5})\s*(open|listening|exposed)\b/i,        // port exposure
+  /\b(connect.?back|reverse\s*shell|bind\s*shell)\b/i,        // backdoor indicators
+  /\b(promiscuous\s*mode|packet\s*sniff|pcap|wireshark)\b/i,  // sniffing
+  /\b(syn\s*flood|ddos|denial.of.service)\b/i,                // DoS attacks
+  /\b(session\s*hijack|tcp\s*hijack|sequence\s*number)\b/i,   // session hijacking
+  /\b(man.in.the.middle|mitm|arp\s*spoof|dns\s*spoof)\b/i,   // MITM attacks
+];
+
+// ─── Code Injection / Exploit Indicators ─────────────────────
+// Patterns that suggest someone is trying to inject code or exploit vulnerabilities
+
+const INJECTION_PATTERNS_SCAN = [
+  /\b(eval|exec|system|popen|shell_exec)\s*\(/i,              // code execution
+  /\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION)\s+/i,            // SQL injection
+  /<script[\s>]/i,                                              // XSS
+  /\.\.\//g,                                                    // directory traversal
+  /\x90{4,}/,                                                   // NOP sled
+  /\\x[0-9a-f]{2}\\x[0-9a-f]{2}\\x[0-9a-f]{2}/i,            // shellcode bytes
+  /\b(0x[0-9a-f]{8,})\b/i,                                    // memory addresses
 ];
 
 // ─── Scanner ─────────────────────────────────────────────────
@@ -187,6 +216,32 @@ export function scanContent(content: string, type: ContentType = 'email'): Threa
     }
   }
 
+  // Network/protocol attack indicators
+  for (const rx of NETWORK_ATTACK_PATTERNS) {
+    const match = content.match(rx);
+    if (match) {
+      indicators.push({
+        category: 'Network Attack',
+        description: 'References network attack techniques or infrastructure exposure',
+        severity: 'high',
+        evidence: match[0],
+      });
+    }
+  }
+
+  // Code injection / exploit indicators
+  for (const rx of INJECTION_PATTERNS_SCAN) {
+    const match = content.match(rx);
+    if (match) {
+      indicators.push({
+        category: 'Code Injection',
+        description: 'Contains patterns associated with code injection or exploitation',
+        severity: 'critical',
+        evidence: match[0].slice(0, 40),
+      });
+    }
+  }
+
   // Deduplicate by category (keep highest severity per category)
   const byCategory = new Map<string, ThreatIndicator>();
   for (const ind of indicators) {
@@ -276,10 +331,33 @@ function generateActions(indicators: ThreatIndicator[], type: ContentType): stri
     actions.push('Consider blocking this sender');
   }
 
+  if (categories.has('Network Attack')) {
+    actions.push('Check your network connections — run a port scan on your device');
+    actions.push('Ensure all connections use HTTPS/TLS encryption');
+    actions.push('If on public WiFi, use a VPN or switch to cellular');
+  }
+
+  if (categories.has('Code Injection')) {
+    actions.push('DO NOT execute or open any code/files from this source');
+    actions.push('This content contains exploitation patterns — treat the source as hostile');
+  }
+
   if (type === 'email' && indicators.length > 0) {
     actions.push('Report this email as phishing in your mail app');
     actions.push('Block the sender');
     actions.push('Delete the email');
+  }
+
+  if (type === 'message' && indicators.length > 0) {
+    actions.push('Do not click any links in this message');
+    actions.push('Block this contact if you don\'t recognize them');
+    actions.push('Screenshot the message for evidence before deleting');
+  }
+
+  if (type === 'link' && indicators.length > 0) {
+    actions.push('DO NOT visit this link');
+    actions.push('If you already visited it, change your passwords immediately');
+    actions.push('Check your accounts for unauthorized activity');
   }
 
   if (indicators.length === 0) {
