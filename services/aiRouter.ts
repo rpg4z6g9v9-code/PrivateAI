@@ -14,7 +14,7 @@
  */
 
 import { generateLocal, isModelLoaded } from './localAI';
-import { executeTool } from './toolExecutor';
+import { executeTool, parseToolCalls as parseTools, stripToolBlocks } from './toolExecutor';
 import type { ToolAction } from './toolTypes';
 import { callClaudeAPI, type ConversationMessage } from './claude';
 import { getContext } from './contextMemory';
@@ -91,21 +91,7 @@ function shouldUseLocal(message: string): boolean {
 
 // ── Tool call parser ──────────────────────────────────────────
 
-/**
- * Extract JSON tool-call objects from a model response.
- * Uses [^{}]* so multi-line JSON blobs are matched correctly.
- */
-function parseToolCalls(response: string): ToolAction[] {
-  const toolPattern = /\{[^{}]*"action"[^{}]*\}/g;
-  const matches = response.match(toolPattern) ?? [];
-
-  return matches
-    .map(m => {
-      try { return JSON.parse(m) as ToolAction; }
-      catch { return null; }
-    })
-    .filter((t): t is ToolAction => t !== null);
-}
+// Tool parsing moved to toolExecutor.ts — uses [TOOL: name] block format
 
 // ── Quick replies ─────────────────────────────────────────────
 
@@ -292,11 +278,30 @@ export async function routeAI(
   const model: 'claude' | 'llama' = useLocal ? 'llama' : 'claude';
 
   // ── Step 2: execute tool calls found in response ─────────────
-  const toolCalls = parseToolCalls(response);
+  const toolCalls = parseTools(response);
+  const toolsUsed: string[] = [];
 
-  for (const toolCall of toolCalls) {
-    const result = await executeTool(toolCall);
-    response += `\n\nTool result: ${JSON.stringify(result)}`;
+  if (toolCalls.length > 0) {
+    // Strip tool blocks from the visible response
+    response = stripToolBlocks(response);
+
+    for (const toolCall of toolCalls) {
+      const { result, success } = await executeTool(toolCall);
+      toolsUsed.push(toolCall.action);
+
+      if (success && result) {
+        // For web search, feed results back to the model for a second pass
+        if (toolCall.action === 'search_web' || toolCall.action === 'web_search') {
+          const followUp = `Based on these search results, update your response:\n\n${result}`;
+          response = useLocal
+            ? await generateLocal(followUp, systemPrompt)
+            : await callClaudeAPI([...historyForModel, { role: 'assistant', content: response }, { role: 'user', content: followUp }], systemPrompt);
+        } else {
+          // Append tool confirmation naturally
+          response += `\n\n${result}`;
+        }
+      }
+    }
   }
 
   return {
@@ -304,6 +309,6 @@ export async function routeAI(
     model,
     route: useLocal ? 'local' : 'cloud',
     latency: Date.now() - t0,
-    toolsUsed: toolCalls.map(t => t.action),
+    toolsUsed,
   };
 }

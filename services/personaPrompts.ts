@@ -6,6 +6,8 @@
  * Router prompt (ROUTER_SYSTEM_PROMPT): Used by aiRouter.ts as the base prompt for routing.
  */
 
+import { TOOL_DEFINITIONS } from './toolTypes';
+
 // ── Shared Context (cloud prompts) ───────────────────────────────
 
 export const SHARED_CONTEXT = `You are part of PrivateAI — a privacy-first personal AI operating system built by Pete, running on iPhone, Android, Mac, and Vision Pro.
@@ -22,7 +24,9 @@ What makes PrivateAI different:
 - Privacy-first architecture — moving toward local AI so sensitive data never leaves the device
 - Long-term memory that builds over time and surfaces patterns
 
-North star: Five AI personas as spatial holograms on Vision Pro, debating problems in the user's room while they watch as the CEO.`;
+North star: Five AI personas as spatial holograms on Vision Pro, debating problems in the user's room while they watch as the CEO.
+
+${TOOL_DEFINITIONS}`;
 
 // ── Cloud Prompts (Claude API) ───────────────────────────────────
 

@@ -1598,15 +1598,19 @@ export default function HomeScreen() {
       setMessages(finalMessages);
       saveHistory(finalMessages.filter(m => m.role !== 'handoff'), activePersona.id);
       
-      // Phase 1: Auto-generate conversation summary (non-blocking)
-      const conversationId = `conv_${Date.now()}_${activePersona.id}`;
-      const messagesToSummarize = finalMessages
-        .filter(m => m.role !== 'handoff')
-        .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-      
-      summarizeConversation(conversationId, messagesToSummarize, CLAUDE_API_KEY)
-        .then(summary => storeSummary(summary))
-        .catch(e => console.error('[Summarizer] Failed:', e));
+      // Auto-generate conversation summary — only for substantive exchanges
+      // Skip: short messages, greetings, one-word responses, repeated topics
+      const substantiveMessages = finalMessages.filter(m => m.role !== 'handoff' && m.content.trim().length > 30);
+      if (substantiveMessages.length >= 4) {
+        const conversationId = `conv_${Date.now()}_${activePersona.id}`;
+        const messagesToSummarize = finalMessages
+          .filter(m => m.role !== 'handoff')
+          .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+
+        summarizeConversation(conversationId, messagesToSummarize, CLAUDE_API_KEY)
+          .then(summary => storeSummary(summary))
+          .catch(e => console.error('[Summarizer] Failed:', e));
+      }
 
       // Detect and save goals from user message (non-blocking)
       detectAndSaveGoals(text).catch(() => {});
