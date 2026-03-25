@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "PrivateAI",
-    "slug": "PrivateAI",
+    "slug": "privateai",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -9,7 +9,22 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "PrivateAI uses the microphone for voice input to your AI personas. Audio is processed on-device.",
+        "NSSpeechRecognitionUsageDescription": "PrivateAI uses speech recognition to convert your voice to text. Processing happens on-device.",
+        "NSCalendarsUsageDescription": "PrivateAI reads your calendar to provide schedule-aware AI responses. Calendar data never leaves your device.",
+        "NSCalendarsFullAccessUsageDescription": "PrivateAI needs full calendar access to read events and create new ones on your behalf. Data stays on-device.",
+        "NSRemindersUsageDescription": "PrivateAI accesses reminders to help you track tasks. Reminder data never leaves your device.",
+        "NSRemindersFullAccessUsageDescription": "PrivateAI needs full reminders access to read and create reminders. Data stays on-device.",
+        "NSPhotoLibraryUsageDescription": "PrivateAI accesses your photo library to attach images for AI analysis. Images are processed locally when possible.",
+        "NSCameraUsageDescription": "PrivateAI uses the camera to capture images for AI analysis. Photos are processed locally when possible.",
+        "NSFaceIDUsageDescription": "PrivateAI uses Face ID to protect your private data vault, including medical records and personal memory.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": ["fetch"]
+      },
+      "bundleIdentifier": "com.chowmein97sorganization.privateai"
     },
     "android": {
       "adaptiveIcon": {
@@ -19,7 +34,13 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_CALENDAR",
+        "android.permission.WRITE_CALENDAR"
+      ],
+      "package": "com.chowmein97sorganization.privateai"
     },
     "web": {
       "output": "static",
@@ -27,6 +48,14 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "PrivateAI reads your calendar to inject schedule context into AI conversations. Nothing leaves your device.",
+          "remindersPermission": "PrivateAI needs access to your reminders to help you stay on track. Nothing leaves your device."
+        }
+      ],
+      "expo-document-picker",
       [
         "expo-splash-screen",
         {
@@ -43,6 +72,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "7ac02962-765a-4774-afd3-4c13576655f8"
+      }
+    },
+    "owner": "chowmein97s-organization"
   }
 }
