@@ -246,7 +246,7 @@ PrivateAI is open source and welcomes contributions.
 
 PrivateAI is free and open source. If you find it useful, consider supporting development:
 
-[Buy Me a Coffee](https://buymeacoffee.com/privateai)
+[Buy Me a Coffee](https://buymeacoffee.com/chowmein97)
 
 ## License
 

@@ -558,7 +558,7 @@ export default function Sidebar(props: SidebarProps) {
             style={s.donateBtn}
             onPress={() => {
               import('react-native').then(({ Linking }) => {
-                Linking.openURL('https://buymeacoffee.com/privateai');
+                Linking.openURL('https://buymeacoffee.com/chowmein97');
               });
             }}>
             <Text style={s.donateBtnText}>support PrivateAI</Text>
