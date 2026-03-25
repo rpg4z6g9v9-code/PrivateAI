@@ -29,6 +29,7 @@ import { logSecurityEvent } from './securityGateway';
 import { searchFiles } from './filesService';
 import { listEntries } from './knowledgeBase';
 import { scanContent, formatThreatReport } from './threatScanner';
+import { recordThreat, isBlocked, checkLearnedPatterns, generateThreatDigest, addToBlocklist } from './threatIntelligence';
 import { Linking } from 'react-native';
 import type { ToolAction } from './toolTypes';
 
@@ -261,10 +262,58 @@ export async function executeTool(action: ToolAction): Promise<{ result: string;
         const content = (action.data as Record<string, string>)?.content;
         if (!content) return { result: 'No content to scan', success: false };
         const type = ((action.data as Record<string, string>)?.type || 'email') as 'email' | 'link' | 'message' | 'file';
+
+        // Check blocklist first — instant block for known threats
+        const blocked = await isBlocked(content);
+        if (blocked) {
+          return {
+            result: `BLOCKED — this content matches a known threat in your blocklist.\n\nBlocked entry: ${blocked.value} (${blocked.type})\nReason: ${blocked.reason}\nHit count: ${blocked.hitCount}`,
+            success: true,
+          };
+        }
+
+        // Check learned patterns
+        const learnedMatches = await checkLearnedPatterns(content);
+
+        // Run full scan
         const report = scanContent(content, type);
-        const formatted = formatThreatReport(report);
-        console.log('[Tool] Threat scan:', report.level, report.indicators.length, 'indicators');
+
+        // Record to threat intelligence — auto-blocks high/critical domains and senders
+        await recordThreat(report, type, content);
+
+        // Format report
+        let formatted = formatThreatReport(report);
+
+        // Append learned pattern matches if any
+        if (learnedMatches.length > 0) {
+          formatted += `\n\nAdditional matches from threat memory: ${learnedMatches.join(', ')}`;
+        }
+
+        // Append blocklist update notification
+        if (report.level === 'critical' || report.level === 'high') {
+          formatted += '\n\nMalicious domains and senders from this content have been auto-added to your blocklist.';
+        }
+
+        console.log('[Tool] Threat scan:', report.level, report.indicators.length, 'indicators,', learnedMatches.length, 'learned matches');
         return { result: formatted, success: true };
+      }
+
+      // ── Threat Digest ────────────────────────────────────
+      case 'threat_digest': {
+        const digest = await generateThreatDigest();
+        console.log('[Tool] Threat digest generated');
+        return { result: digest, success: true };
+      }
+
+      // ── Block Sender ──────────────────────────────────────
+      case 'block_sender': {
+        const type = (action.data as Record<string, string>)?.type as 'domain' | 'email' | 'ip' | 'phone';
+        const value = (action.data as Record<string, string>)?.value;
+        const reason = (action.data as Record<string, string>)?.reason || 'Manually blocked';
+        if (!type || !value) return { result: 'Need both type and value to block', success: false };
+        const entry = await addToBlocklist(type, value, reason);
+        console.log('[Tool] Blocked:', type, value);
+        return { result: `Blocked ${type}: ${value}\nReason: ${reason}\nThis ${type} will be flagged in future scans.`, success: true };
       }
 
       default:

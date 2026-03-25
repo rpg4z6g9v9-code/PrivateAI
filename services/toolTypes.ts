@@ -16,6 +16,8 @@ export type ToolActionType =
   | 'open_app'
   | 'run_shortcut'
   | 'scan_threat'
+  | 'threat_digest'
+  | 'block_sender'
   | 'web_search'       // legacy alias for search_web
   | 'memory_store'
   | 'memory_retrieve';
@@ -149,6 +151,26 @@ Example:
 [TOOL: scan_threat]
 type: email
 content: Subject: URGENT: Your account has been compromised! Click here immediately to verify...
+[/TOOL]
+
+### threat_digest
+Get a summary of recent threat activity — scans, blocks, exposures, repeat offenders.
+No parameters needed.
+Example:
+[TOOL: threat_digest]
+[/TOOL]
+
+### block_sender
+Manually add a domain, email, IP, or phone number to the blocklist.
+Parameters:
+  type: "domain", "email", "ip", or "phone" (required)
+  value: The value to block (required)
+  reason: Why it's being blocked (required)
+Example:
+[TOOL: block_sender]
+type: email
+value: spammer@fake-domain.com
+reason: Phishing email attempting credential theft
 [/TOOL]
 
 Rules:
