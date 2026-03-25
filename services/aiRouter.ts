@@ -15,6 +15,7 @@
 
 import { generateLocal, isModelLoaded } from './localAI';
 import { executeTool, parseToolCalls as parseTools, stripToolBlocks } from './toolExecutor';
+import { sharpenForLocalModel, sharpenForCloudAPI } from './promptSharpener';
 import type { ToolAction } from './toolTypes';
 import { callClaudeAPI, type ConversationMessage } from './claude';
 import { getContext } from './contextMemory';
@@ -188,11 +189,9 @@ export async function routeAI(
   let systemPrompt = assembled.systemPrompt;
   let historyForModel: ConversationMessage[] = assembled.messages;
 
-  // ── Local model hard cap ──────────────────────────────────────
-  // Llama 3.2 3B has a 2048-token context. If routed to local,
-  // use compact local prompt + inject a condensed shared context (goals/profile).
-  // Budget: ~800 tokens system, ~1200 for conversation.
+  // ── Prompt Sharpener ────────────────────────────────────────
   if (useLocal && systemPrompt.length > 2000) {
+    // LOCAL: Structure the prompt for the 3B model's limited context
     const { buildLocalSystemPrompt } = require('./localAI');
     const { buildSharedContextCompact } = require('./sharedMemory');
     const localPersonaId = options.systemPrompt?.includes('Atlas') ? 'atlas'
@@ -200,12 +199,49 @@ export async function routeAI(
       : options.systemPrompt?.includes('Cipher') ? 'cipher'
       : options.systemPrompt?.includes('Lumen') ? 'lumen'
       : 'pete';
-    const localBase = buildLocalSystemPrompt(localPersonaId);
+    const personaNames: Record<string, [string, string]> = {
+      atlas: ['Atlas', 'strategic advisor'],
+      vera: ['Vera', 'health monitor'],
+      cipher: ['Cipher', 'security analyst'],
+      lumen: ['Lumen', 'research specialist'],
+      pete: ['Atom', 'personal assistant'],
+    };
+    const [pName, pRole] = personaNames[localPersonaId] ?? ['Atom', 'assistant'];
     const sharedCompact: string = await buildSharedContextCompact();
-    systemPrompt = localBase + sharedCompact;
-    // Only keep last 2 turns for local to save context
-    historyForModel = historyForModel.slice(-3);
-    console.log('[aiRouter] local cap applied — prompt trimmed to', systemPrompt.length, 'chars');
+
+    // Sharpen the user message into structured format
+    const sharpened = sharpenForLocalModel(userMessage, pName, pRole, sharedCompact);
+
+    // Use local base prompt + sharpened user message replaces last message
+    const localBase = buildLocalSystemPrompt(localPersonaId);
+    systemPrompt = localBase;
+    // Replace the user message with the structured version
+    historyForModel = [{ role: 'user' as const, content: sharpened.text }];
+
+    console.log('[aiRouter] sharpened for local:', sharpened.changes.join(', '), '| prompt:', systemPrompt.length, 'chars');
+  } else if (!useLocal) {
+    // CLOUD: Sharpen for quality + privacy filter
+    const pName = options.systemPrompt?.includes('Atlas') ? 'Atlas'
+      : options.systemPrompt?.includes('Vera') ? 'Vera'
+      : options.systemPrompt?.includes('Cipher') ? 'Cipher'
+      : options.systemPrompt?.includes('Lumen') ? 'Lumen'
+      : 'Atom';
+    const sharpened = sharpenForCloudAPI(userMessage, pName);
+
+    if (sharpened.privacyStripped.length > 0) {
+      console.log('[aiRouter] privacy stripped:', sharpened.privacyStripped.join(', '));
+      // Replace the last message (user message) with the privacy-filtered version
+      if (historyForModel.length > 0) {
+        historyForModel[historyForModel.length - 1] = {
+          role: 'user' as const,
+          content: sharpened.text,
+        };
+      }
+    }
+
+    if (sharpened.changes.length > 0) {
+      console.log('[aiRouter] cloud sharpening:', sharpened.changes.join(', '));
+    }
   }
 
   console.log('[aiRouter] prompt:', {
