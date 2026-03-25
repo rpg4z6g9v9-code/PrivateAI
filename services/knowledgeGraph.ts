@@ -804,3 +804,113 @@ export async function getGraphVisualizationData(): Promise<GraphVisData> {
     return { nodes: [], edges: [] };
   }
 }
+
+// ── AI-Extracted Knowledge Ingestion ─────────────────────────
+
+import type { ExtractedEntity, ExtractedRelationship, ExtractionResult } from './knowledgeExtractor';
+
+const ENTITY_TYPE_MAP: Record<string, KGNode['type']> = {
+  person: 'topic', tool: 'topic', project: 'project',
+  concept: 'topic', preference: 'preference', goal: 'interest', decision: 'insight',
+};
+
+/**
+ * Ingest AI-extracted entities and relationships into the knowledge graph.
+ */
+export async function ingestExtraction(result: ExtractionResult): Promise<{ nodes: number; edges: number }> {
+  if (!db) return { nodes: 0, edges: 0 };
+  const now = Date.now();
+  let nodesCreated = 0;
+  let edgesCreated = 0;
+
+  try {
+    for (const entity of result.entities) {
+      const label = normalizeLabel(entity.label);
+      if (!isValidLabel(label)) continue;
+      const nodeType = ENTITY_TYPE_MAP[entity.type] ?? 'topic';
+
+      const existing = await db.getFirstAsync<KGNode>(
+        'SELECT * FROM kg_nodes WHERE LOWER(label) = ?', label.toLowerCase(),
+      );
+
+      if (existing) {
+        const betterDesc = entity.description.length > (existing.description?.length ?? 0);
+        await db.runAsync(
+          `UPDATE kg_nodes SET frequency = frequency + 1, lastSeen = ?, confidence = MAX(confidence, ?)
+           ${betterDesc ? ', description = ?' : ''}
+           WHERE id = ?`,
+          ...(betterDesc
+            ? [now, entity.confidence, entity.description, existing.id]
+            : [now, entity.confidence, existing.id]),
+        );
+      } else {
+        await db.runAsync(
+          `INSERT INTO kg_nodes (id, type, label, description, confidence, firstSeen, lastSeen, frequency, node_type, learned, confirmed, created_at, source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'concept', 1, 0, ?, 'ai_extraction')`,
+          uuid(), nodeType, label, entity.description, entity.confidence, now, now, now,
+        );
+        nodesCreated++;
+      }
+    }
+
+    for (const rel of result.relationships) {
+      const fromLabel = normalizeLabel(rel.from);
+      const toLabel = normalizeLabel(rel.to);
+      const fromNode = await db.getFirstAsync<{ id: string }>('SELECT id FROM kg_nodes WHERE LOWER(label) = ?', fromLabel.toLowerCase());
+      const toNode = await db.getFirstAsync<{ id: string }>('SELECT id FROM kg_nodes WHERE LOWER(label) = ?', toLabel.toLowerCase());
+      if (!fromNode || !toNode) continue;
+
+      const existingEdge = await db.getFirstAsync<{ id: string; strength: number }>(
+        'SELECT id, strength FROM kg_edges WHERE (fromId = ? AND toId = ?) OR (fromId = ? AND toId = ?)',
+        fromNode.id, toNode.id, toNode.id, fromNode.id,
+      );
+
+      if (existingEdge) {
+        const newStrength = Math.min(1.0, (existingEdge.strength ?? 0.3) + 0.15);
+        await db.runAsync(
+          'UPDATE kg_edges SET strength = ?, relation = ?, relation_type = ? WHERE id = ?',
+          newStrength, rel.relation, rel.description, existingEdge.id,
+        );
+      } else {
+        await db.runAsync(
+          'INSERT INTO kg_edges (id, fromId, toId, relation, strength, relation_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          uuid(), fromNode.id, toNode.id, rel.relation, rel.confidence, rel.description, now,
+        );
+        edgesCreated++;
+      }
+    }
+
+    if (nodesCreated > 0 || edgesCreated > 0) {
+      console.log(`[KG] AI ingestion: ${nodesCreated} new nodes, ${edgesCreated} new edges`);
+    }
+    return { nodes: nodesCreated, edges: edgesCreated };
+  } catch (e) {
+    console.error('[KG] AI ingestion failed:', e);
+    return { nodes: 0, edges: 0 };
+  }
+}
+
+/**
+ * Decay confidence on unconfirmed nodes not seen in 14+ days.
+ * Prune nodes below 0.15 confidence. Clean up orphaned edges.
+ */
+export async function decayConfidence(): Promise<number> {
+  if (!db) return 0;
+  try {
+    const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
+    await db.runAsync(
+      'UPDATE kg_nodes SET confidence = confidence * 0.85 WHERE confirmed = 0 AND lastSeen < ? AND confidence > 0.2',
+      cutoff,
+    );
+    const pruned = await db.runAsync('DELETE FROM kg_nodes WHERE confidence < 0.15 AND confirmed = 0');
+    await db.runAsync(
+      'DELETE FROM kg_edges WHERE fromId NOT IN (SELECT id FROM kg_nodes) OR toId NOT IN (SELECT id FROM kg_nodes)',
+    );
+    const removed = pruned.changes ?? 0;
+    if (removed > 0) console.log(`[KG] Decay: ${removed} stale nodes pruned`);
+    return removed;
+  } catch (e) {
+    console.warn('[KG] Decay failed:', e);
+    return 0;
+  }
+}

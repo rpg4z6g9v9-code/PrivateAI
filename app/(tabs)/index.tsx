@@ -20,6 +20,8 @@ import {
 } from '@/components/chat/types';
 import { loadMemory, extractPatterns, buildMemoryPrompt, clearMemory, relativeDate, MemoryEntry } from '@/services/memory';
 import { buildPersonaSharedContext, detectAndSaveGoals, getProfile, saveProfile } from '@/services/sharedMemory';
+import { extractKnowledge, shouldExtract } from '@/services/knowledgeExtractor';
+import { ingestExtraction, decayConfidence } from '@/services/knowledgeGraph';
 import {
   fetchTodayEvents, fetchTomorrowEvents, fetchWeekEvents,
   requestCalendarPermissions, hasCalendarPermission, formatEventsForPrompt,
@@ -383,7 +385,7 @@ export default function HomeScreen() {
     AsyncStorage.getItem(OFFLINE_MODE_KEY).then(v => { if (v !== null) setOfflineMode(v === 'true'); });
     AsyncStorage.getItem(AVATAR_MODE_KEY).then(v => { if (v === 'mini' || v === 'hidden' || v === 'full') setAvatarMode(v); });
     listEntries(PERSONAS[0].id).then(setKbEntries);
-    initKnowledgeGraph();
+    initKnowledgeGraph().then(() => decayConfidence().catch(() => {}));
     // Run data integrity checks on startup (non-blocking)
     import('@/services/integrityCheck').then(({ runIntegrityChecks }) => {
       runIntegrityChecks().then(result => {
@@ -1614,6 +1616,13 @@ export default function HomeScreen() {
 
       // Detect and save goals from user message (non-blocking)
       detectAndSaveGoals(text).catch(() => {});
+
+      // AI-powered knowledge extraction (non-blocking, cloud only)
+      if (!useLocalAI && shouldExtract(text, reply)) {
+        extractKnowledge(text, reply)
+          .then(result => { if (result) ingestExtraction(result); })
+          .catch(() => {});
+      }
 
       speak(reply, respondingPersona.id);
       // Memory extraction disabled — user triggers via "remember this" button
