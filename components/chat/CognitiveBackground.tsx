@@ -1,5 +1,5 @@
 /**
- * SacredGeometryBackground — Animated Flower of Life + Golden Spiral overlay.
+ * CognitiveBackground — Animated Flower of Life + Golden Spiral overlay.
  * Extracted from app/(tabs)/index.tsx.
  */
 
@@ -52,7 +52,7 @@ function goldenSpiralPath(cx: number, cy: number, maxR: number): string {
   return d;
 }
 
-export default function SacredGeometryBackground({ isSpeaking }: { isSpeaking: boolean }) {
+export default function CognitiveBackground({ isSpeaking }: { isSpeaking: boolean }) {
   const W  = _W;
   const H  = _H;
   const cx = W / 2;

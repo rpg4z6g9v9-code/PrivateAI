@@ -14,8 +14,8 @@
 
 // ── Types ─────────────────────────────────────────────────────
 
-export type NetworkDest = 'claude_api' | 'elevenlabs' | 'tavily' | 'unknown';
-export type NetworkSafety = 'safe' | 'unexpected';
+export type NetworkDest = 'claude_api' | 'elevenlabs' | 'tavily' | 'local_llama' | 'unknown';
+export type NetworkSafety = 'safe' | 'unexpected' | 'blocked';
 
 export interface NetworkCallEntry {
   id:                  string;
@@ -56,6 +56,7 @@ export const DEST_LABEL: Record<NetworkDest, string> = {
   claude_api:  'Claude API',
   elevenlabs:  'ElevenLabs',
   tavily:      'Tavily Search',
+  local_llama: 'Local (Mac Mini)',
   unknown:     'Unknown Host',
 };
 
@@ -63,6 +64,7 @@ export const DEST_COLOR: Record<NetworkDest, string> = {
   claude_api:  '#00ff88',
   elevenlabs:  '#a855f7',
   tavily:      '#38bdf8',
+  local_llama: '#00ff00',
   unknown:     '#ef4444',
 };
 

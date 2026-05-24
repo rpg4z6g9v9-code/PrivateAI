@@ -23,9 +23,10 @@ import {
   View,
 } from 'react-native';
 import secureStorage from '@/services/secureStorage';
-import { requestCalendarPermissions } from '@/services/calendarService';
-import { requestRemindersPermissions } from '@/services/remindersService';
 import * as LocalAuth from 'expo-local-authentication';
+
+async function requestCalendarPermissions(): Promise<boolean> { return false; }
+async function requestRemindersPermissions(): Promise<boolean> { return false; }
 
 const FONT = Platform.OS === 'ios' ? 'Courier New' : 'monospace';
 const ONBOARDING_COMPLETE_KEY = 'onboarding_complete_v1';
@@ -146,17 +147,17 @@ export default function OnboardingScreen() {
         {/* ── Step 0: API Key ── */}
         {step === 0 && (
           <View style={s.stepContainer}>
-            <Text style={s.stepTitle}>connect to claude</Text>
+            <Text style={s.stepTitle}>cloud ai (optional)</Text>
             <Text style={s.stepDesc}>
-              PrivateAI uses Claude as its cloud AI engine. Paste your API key below.
-              {'\n\n'}Get one at console.anthropic.com/settings/keys
+              PrivateAI runs locally on your Mac Mini — no cloud required.{'\n\n'}
+              If you want Claude as a fallback for cloud routing, paste an API key below. Otherwise, skip.
             </Text>
 
             <TextInput
               style={s.input}
               value={apiKey}
               onChangeText={t => { setApiKey(t); setKeyError(''); }}
-              placeholder="sk-ant-api03-..."
+              placeholder="sk-ant-api03-... (optional)"
               placeholderTextColor="#333"
               autoCapitalize="none"
               autoCorrect={false}
@@ -176,8 +177,12 @@ export default function OnboardingScreen() {
               )}
             </TouchableOpacity>
 
+            <TouchableOpacity onPress={() => setStep(1)}>
+              <Text style={s.skipText}>skip — run local only</Text>
+            </TouchableOpacity>
+
             <Text style={s.hint}>
-              Your key is stored in the iOS Keychain (AES-256).{'\n'}It never leaves your device.
+              If added, your key is stored in the iOS Keychain (AES-256).{'\n'}It never leaves your device.
             </Text>
           </View>
         )}

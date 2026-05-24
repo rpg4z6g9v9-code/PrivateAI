@@ -1,350 +1,137 @@
 /**
- * aiRouter.ts — PrivateAI AI Router
- *
- * Single entry point: decide local (Llama) vs cloud (Claude), execute inference,
- * parse tool calls from the response, run them, then feed results back for a
- * refined answer.
- *
- * Routing: reasoning → cloud (Claude), discussion → local (Llama).
- *
- * Context isolation: reasoning tasks get austere prompts (no memory/history bleed),
- * chat tasks get rich prompts with filtered memory and capped recent turns.
- *
- * Compression activates when history > MIN_MESSAGES_TO_COMPRESS (chat mode only).
+ * aiRouter.ts — AI Routing Layer
+ * 
+ * Route requests to Claude API (cloud) or local Llama based on:
+ * 1. Data sensitivity (medical/financial → local if available)
+ * 2. Safe mode (injection detected → local only)
+ * 3. Model availability
+ * 
+ * Privacy guarantee: Sensitive data never touches cloud APIs.
  */
 
-import { generateLocal, isModelLoaded } from './localAI';
-import { executeTool, parseToolCalls as parseTools, stripToolBlocks } from './toolExecutor';
-import { sharpenForLocalModel, sharpenForCloudAPI } from './promptSharpener';
-import type { ToolAction } from './toolTypes';
-import { callClaudeAPI, type ConversationMessage } from './claude';
-import { getContext } from './contextMemory';
-import { compressConversationHistory } from './contextCompressor';
-import {
-  extractAndIndexConcepts, queryGraphContext, getTopInsights,
-  isLearnQuery, synthesizeInsights,
-  containsMilestone, createMilestone,
-  shouldAutoIndex,
-} from './knowledgeGraph';
-// ROUTER_SYSTEM_PROMPT available from personaPrompts if needed
-import { detectTaskType, type PromptMode } from './atomPrompts';
-import {
-  routeAndAssemble, getIsolationMode, sanitizeForPrompt,
-  getFileContextForPrompt,
-  type AssembledPrompt,
-} from './contextIsolation';
+import { AIRouteParams, AIRouteResult, ConversationMessage, ClaudeAPIRequest, ClaudeAPIResponse } from '@/services/claude';
+import { generateLocal } from '@/services/localAI';
+import { isModelLoaded } from '@/services/localAI';
 
-// ── Types ─────────────────────────────────────────────────────
+const CLAUDE_API_KEY = process.env.EXPO_PUBLIC_CLAUDE_API_KEY ?? '';
+const CLAUDE_API_BASE = 'https://api.anthropic.com/v1/messages';
 
-export interface AIRouterResult {
-  text: string;
-  model: 'claude' | 'llama' | 'instant';
-  route: 'local' | 'cloud' | 'quick_reply';
-  latency: number;
-  toolsUsed: string[];
-}
+// ── System Prompts ──────────────────────────────────────────
 
-// ── Compression config ────────────────────────────────────────
+const SYSTEM_PROMPT = `You are Claude, a helpful AI assistant. You are conversing with the user on their private device.
 
-const COMPRESSION_CONFIG = {
-  /** Compression only activates when history exceeds this length. */
-  MIN_MESSAGES_TO_COMPRESS: 8,
-  /** Always keep this many recent messages verbatim. */
-  KEEP_RECENT_MESSAGES: 6,
-  /** Set to false to disable compression globally (e.g. for debugging). */
-  COMPRESSION_ENABLED: true,
-} as const;
+You are trustworthy, honest, and direct. You respect the user's privacy and only provide information when asked.
 
-// ── Smart Routing ────────────────────────────────────────────
+Keep responses concise and clear.`;
 
-type QuestionType = 'reasoning' | 'discussion';
+// ── Route Decision ───────────────────────────────────────────
 
-const REASONING_KEYWORDS = [
-  'logic', 'puzzle', 'syllogism', 'math', 'calculate',
-  'pattern', 'sequence', 'day of week', 'date',
-  'how many', 'solve', 'next number', 'what comes next',
-  'if all', 'if some', 'therefore', 'conclude',
-];
+export async function routeAI(params: AIRouteParams): Promise<AIRouteResult> {
+  const { messages, isSensitive, safeMode } = params;
 
-const DISCUSSION_KEYWORDS = [
-  'explain', 'why', 'ethical', 'should', 'transparent',
-  'aware', 'hallucination', 'uncertainty', 'privacy',
-  'opinion', 'think about', 'what do you',
-];
-
-function detectQuestionType(text: string): QuestionType {
-  const lower = text.toLowerCase();
-  if (REASONING_KEYWORDS.some(k => lower.includes(k))) return 'reasoning';
-  if (DISCUSSION_KEYWORDS.some(k => lower.includes(k))) return 'discussion';
-  return 'discussion';
-}
-
-/**
- * Smart routing: reasoning → cloud (Claude is better at logic),
- * discussion → local when model is loaded (Llama handles conversation fine).
- * Falls back to old heuristic when forceLocal is set.
- */
-function shouldUseLocal(message: string): boolean {
-  const qType = detectQuestionType(message);
-  console.log('[aiRouter] questionType:', qType, '→ prefer:', qType === 'reasoning' ? 'cloud' : 'local');
-  return qType !== 'reasoning';
-}
-
-// ── Tool call parser ──────────────────────────────────────────
-
-// Tool parsing moved to toolExecutor.ts — uses [TOOL: name] block format
-
-// ── Quick replies ─────────────────────────────────────────────
-
-const QUICK_REPLIES: Record<string, string> = {
-  hi:           "Hey! What are we building today?",
-  hello:        "Hey! What are we building today?",
-  thanks:       "You're welcome!",
-  'thank you':  "You're welcome!",
-  ok:           "Got it.",
-  okay:         "Got it.",
-};
-
-// ── Main router ───────────────────────────────────────────────
-
-/**
- * Route a message to the best available model, run any tool calls in the
- * response, then return a refined final answer.
- *
- * Falls back to Claude if Llama is not loaded, even when routing prefers local.
- */
-export async function routeAI(
-  userMessage: string,
-  options: {
-    forceLocal?: boolean;
-    history?: ConversationMessage[];
-    systemPrompt?: string;
-    mode?: PromptMode;
-    /** Structured context for isolation layer (preferred over systemPrompt) */
-    memoryPrompt?: string;
-    knowledgeContext?: string;
-    connectorContext?: string;
-    medicalContext?: string;
-    fileContext?: string;
-  } = {},
-): Promise<AIRouterResult> {
-  const t0 = Date.now();
-
-  // ── Quick reply: no model call needed ───────────────────────
-  const quickReply = QUICK_REPLIES[userMessage.toLowerCase().trim()];
-  if (quickReply) {
-    return { text: quickReply, model: 'instant', route: 'quick_reply', latency: 0, toolsUsed: [] };
-  }
-
-  // ── "What have you learned?" — synthesize from KG directly ──
-  if (isLearnQuery(userMessage)) {
-    const insights = await synthesizeInsights();
-    return { text: insights, model: 'instant', route: 'quick_reply', latency: Date.now() - t0, toolsUsed: [] };
-  }
-
-  // ── Routing decision ─────────────────────────────────────────
-  const preferLocal = options.forceLocal !== undefined
-    ? options.forceLocal
-    : shouldUseLocal(userMessage);
-  const modelLoaded = isModelLoaded();
-  const useLocal = preferLocal && modelLoaded;
-
-  console.log('[aiRouter] routing decision:', {
-    messageLength: userMessage.length,
-    hasResearch:   userMessage.includes('research'),
-    forceLocal:    options.forceLocal,
-    preferLocal,
-    modelLoaded,
-    useLocal,
-    decidedRoute:  useLocal ? 'llama' : 'claude',
-  });
-
-  // ── Context Isolation: assemble prompt based on task type ────
-  const promptMode: PromptMode = options.mode ?? (useLocal ? 'local' : 'cloud');
-  const taskType = detectTaskType(userMessage);
-  const isolation = getIsolationMode(taskType);
-
-  // ── Document grounding: fetch relevant file context (chat only) ─
-  let fileContext = options.fileContext ?? '';
-  if (isolation === 'chat' && !fileContext) {
-    try {
-      fileContext = await getFileContextForPrompt(userMessage);
-    } catch (e) {
-      console.warn('[Router] getFileContextForPrompt failed:', e);
-      fileContext = '';
-    }
-  }
-
-  const assembled: AssembledPrompt = routeAndAssemble(userMessage, promptMode, {
-    personaPrompt: options.systemPrompt,
-    memoryPrompt: options.memoryPrompt,
-    knowledgeContext: options.knowledgeContext,
-    connectorContext: options.connectorContext,
-    medicalContext: options.medicalContext,
-    fileContext,
-    contextEcho: getContext(),
-    history: options.history,
-  });
-
-  let systemPrompt = assembled.systemPrompt;
-  let historyForModel: ConversationMessage[] = assembled.messages;
-
-  // ── Prompt Sharpener ────────────────────────────────────────
-  if (useLocal && systemPrompt.length > 2000) {
-    // LOCAL: Structure the prompt for the 3B model's limited context
-    const { buildLocalSystemPrompt } = require('./localAI');
-    const { buildSharedContextCompact } = require('./sharedMemory');
-    const localPersonaId = options.systemPrompt?.includes('Atlas') ? 'atlas'
-      : options.systemPrompt?.includes('Vera') ? 'vera'
-      : options.systemPrompt?.includes('Cipher') ? 'cipher'
-      : options.systemPrompt?.includes('Lumen') ? 'lumen'
-      : 'pete';
-    const personaNames: Record<string, [string, string]> = {
-      atlas: ['Atlas', 'strategic advisor'],
-      vera: ['Vera', 'health monitor'],
-      cipher: ['Cipher', 'security analyst'],
-      lumen: ['Lumen', 'research specialist'],
-      pete: ['Atom', 'personal assistant'],
-    };
-    const [pName, pRole] = personaNames[localPersonaId] ?? ['Atom', 'assistant'];
-    const sharedCompact: string = await buildSharedContextCompact();
-
-    // Sharpen the user message into structured format
-    const sharpened = sharpenForLocalModel(userMessage, pName, pRole, sharedCompact);
-
-    // Use local base prompt + sharpened user message replaces last message
-    const localBase = buildLocalSystemPrompt(localPersonaId);
-    systemPrompt = localBase;
-    // Replace the user message with the structured version
-    historyForModel = [{ role: 'user' as const, content: sharpened.text }];
-
-    console.log('[aiRouter] sharpened for local:', sharpened.changes.join(', '), '| prompt:', systemPrompt.length, 'chars');
-  } else if (!useLocal) {
-    // CLOUD: Sharpen for quality + privacy filter
-    const pName = options.systemPrompt?.includes('Atlas') ? 'Atlas'
-      : options.systemPrompt?.includes('Vera') ? 'Vera'
-      : options.systemPrompt?.includes('Cipher') ? 'Cipher'
-      : options.systemPrompt?.includes('Lumen') ? 'Lumen'
-      : 'Atom';
-    const sharpened = sharpenForCloudAPI(userMessage, pName);
-
-    if (sharpened.privacyStripped.length > 0) {
-      console.log('[aiRouter] privacy stripped:', sharpened.privacyStripped.join(', '));
-      // Replace the last message (user message) with the privacy-filtered version
-      if (historyForModel.length > 0) {
-        historyForModel[historyForModel.length - 1] = {
-          role: 'user' as const,
-          content: sharpened.text,
-        };
-      }
-    }
-
-    if (sharpened.changes.length > 0) {
-      console.log('[aiRouter] cloud sharpening:', sharpened.changes.join(', '));
-    }
-  }
-
-  console.log('[aiRouter] prompt:', {
-    length: systemPrompt.length,
-    mode: promptMode,
-    taskType,
-    isolation,
-    hasPersonaPrompt: !!options.systemPrompt,
-  });
-
-  // ── Compression (chat mode only — reasoning stays austere) ───
-  if (
-    isolation === 'chat' &&
-    !useLocal &&
-    COMPRESSION_CONFIG.COMPRESSION_ENABLED &&
-    historyForModel.length > COMPRESSION_CONFIG.MIN_MESSAGES_TO_COMPRESS
-  ) {
-    // Separate the final user message before compressing history
-    const currentUserMsg = historyForModel[historyForModel.length - 1];
-    const pastMessages = historyForModel.slice(0, -1);
-
-    const compressed = await compressConversationHistory(
-      pastMessages,
-      COMPRESSION_CONFIG.KEEP_RECENT_MESSAGES,
+  // Rule 1: Sensitive data (medical/financial/PII) → always local if available
+  if (isSensitive) {
+    const localResult = await tryLocalRoute(messages);
+    if (localResult) return localResult;
+    // Fallback: reject cloud route, force user to acknowledge
+    throw new Error(
+      'Cannot send sensitive data to cloud. Local AI not available. Enable on-device processing or remove sensitive content.'
     );
-
-    if (compressed.summary) {
-      systemPrompt += `\n\nEarlier conversation summary:\n${compressed.summary}`;
-    }
-
-    historyForModel = [...compressed.compressedMessages, currentUserMsg];
   }
 
-  // ── Knowledge Graph: auto-index + milestone detection ──────────
-  // Quality-gated: only index substantive messages (not greetings/questions/commands)
-  if (shouldAutoIndex(userMessage)) {
-    extractAndIndexConcepts(userMessage).catch((e) => {
-      console.warn('[KG] Auto-index failed (non-fatal):', e);
-    });
-
-    // Auto-detect milestones (significant decisions)
-    if (containsMilestone(userMessage)) {
-      const title = userMessage.length > 80 ? userMessage.slice(0, 80) + '...' : userMessage;
-      createMilestone(title).catch(() => {});
-    }
+  // Rule 2: Safe mode (injection detected) → local only
+  if (safeMode) {
+    const localResult = await tryLocalRoute(messages);
+    if (localResult) return localResult;
+    throw new Error(
+      'Cloud features disabled due to security event. Use local AI or reset the app.'
+    );
   }
 
-  // Enrich system prompt with graph context — CHAT ONLY
-  // Reasoning tasks stay austere to prevent context contamination
-  if (isolation === 'chat') {
-    const [graphContext, topInsights] = await Promise.all([
-      queryGraphContext(userMessage),
-      getTopInsights(),
-    ]);
-    if (graphContext) {
-      const cleaned = sanitizeForPrompt(graphContext);
-      if (cleaned) systemPrompt += `\n\n${cleaned}`;
-    }
-    if (topInsights) {
-      const cleaned = sanitizeForPrompt(topInsights);
-      if (cleaned) systemPrompt += `\n\n${cleaned}`;
-    }
+  // Rule 3: Local-first (general queries)
+  console.log('[Router] Routing: local');
+  const localResult = await tryLocalRoute(messages);
+  if (localResult) return localResult;
+
+  // Cloud fallback if local unavailable or fails
+  console.log('[Router] Routing: cloud fallback');
+  return await cloudRoute(messages);
+}
+
+// ── Cloud Route ──────────────────────────────────────────────
+
+async function cloudRoute(messages: ConversationMessage[]): Promise<AIRouteResult> {
+  if (!CLAUDE_API_KEY) {
+    throw new Error('Claude API key not configured');
   }
 
-  // ── Step 1: first model call ─────────────────────────────────
-  let response = useLocal
-    ? await generateLocal(userMessage, systemPrompt)
-    : await callClaudeAPI(historyForModel, systemPrompt);
+  const start = Date.now();
 
-  const model: 'claude' | 'llama' = useLocal ? 'llama' : 'claude';
+  const payload: ClaudeAPIRequest = {
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 1024,
+    system: SYSTEM_PROMPT,
+    messages,
+  };
 
-  // ── Step 2: execute tool calls found in response ─────────────
-  const toolCalls = parseTools(response);
-  const toolsUsed: string[] = [];
+  const response = await fetch(CLAUDE_API_BASE, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': CLAUDE_API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify(payload),
+  });
 
-  if (toolCalls.length > 0) {
-    // Strip tool blocks from the visible response
-    response = stripToolBlocks(response);
-
-    for (const toolCall of toolCalls) {
-      const { result, success } = await executeTool(toolCall);
-      toolsUsed.push(toolCall.action);
-
-      if (success && result) {
-        // For web search, feed results back to the model for a second pass
-        if (toolCall.action === 'search_web' || toolCall.action === 'web_search') {
-          const followUp = `Based on these search results, update your response:\n\n${result}`;
-          response = useLocal
-            ? await generateLocal(followUp, systemPrompt)
-            : await callClaudeAPI([...historyForModel, { role: 'assistant', content: response }, { role: 'user', content: followUp }], systemPrompt);
-        } else {
-          // Append tool confirmation naturally
-          response += `\n\n${result}`;
-        }
-      }
-    }
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Claude API error: ${response.status} ${error}`);
   }
+
+  const data: ClaudeAPIResponse = await response.json();
+  const latency = Date.now() - start;
+
+  const text = data.content[0]?.text ?? '';
 
   return {
-    text: response,
-    model,
-    route: useLocal ? 'local' : 'cloud',
-    latency: Date.now() - t0,
-    toolsUsed,
+    text,
+    route: 'cloud',
+    model: data.model,
+    latency,
+    tokens: {
+      input: data.usage.input_tokens,
+      output: data.usage.output_tokens,
+    },
   };
+}
+
+// ── Local Route (Llama 1B) ───────────────────────────────────
+
+async function tryLocalRoute(
+  messages: ConversationMessage[]
+): Promise<AIRouteResult | null> {
+  console.log('[Router] tryLocalRoute entered');
+  console.log('[Router] checking isModelLoaded');
+  const isLoaded = await isModelLoaded();
+  console.log('[Router] isModelLoaded result:', isLoaded);
+  if (!isLoaded) return null;
+
+  try {
+    console.log('[Router] calling generateLocal');
+    const start = Date.now();
+    const lastMessage = messages[messages.length - 1]?.content ?? '';
+    const text = await generateLocal(lastMessage, SYSTEM_PROMPT);
+    const latency = Date.now() - start;
+
+    return {
+      text,
+      route: 'local',
+      model: 'llama-1b',
+      latency,
+    };
+  } catch (e) {
+    console.error('[Router] Local route failed:', String(e), e instanceof Error ? e.message : '');
+    return null;
+  }
 }

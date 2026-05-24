@@ -1,6 +1,6 @@
 {
   "cli": {
-    "version": ">= 18.1.0",
+    "version": ">= 18.0.0",
     "appVersionSource": "remote"
   },
   "build": {
@@ -8,7 +8,7 @@
       "developmentClient": true,
       "distribution": "internal",
       "ios": {
-        "simulator": true
+        "simulator": false
       },
       "env": {
         "APP_VARIANT": "development"
@@ -30,7 +30,8 @@
         "image": "latest"
       },
       "env": {
-        "APP_VARIANT": "production"
+        "APP_VARIANT": "production",
+        "EXPO_NO_DOCTOR": "1"
       }
     }
   },

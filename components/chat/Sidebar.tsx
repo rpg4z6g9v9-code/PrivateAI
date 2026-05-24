@@ -3,10 +3,10 @@
  * Extracted from app/(tabs)/index.tsx.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Animated, Dimensions, ScrollView, StyleSheet, Switch,
-  Text, TouchableOpacity, TouchableWithoutFeedback, View,
+  Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -15,15 +15,68 @@ import {
   PERSONA_DESCS,
 } from '@/components/chat/types';
 import { MemoryEntry, relativeDate } from '@/services/memory';
-import {
-  entryTypeLabel, entryTypeColor, entryRelativeDate,
-  patternTypeLabel, patternTypeColor, confidenceBar,
-  type MedicalEntry, type PatternSummary,
-} from '@/services/medicalMemory';
-import { KnowledgeEntry, relKbDate, fmtKbSize } from '@/services/knowledgeBase';
 import { releaseModel, deleteModelFile } from '@/services/localAI';
 import { resetSessionLock } from '@/services/securityGateway';
-import type { IndexProgress } from '@/services/fileIndexer';
+
+// ── Inline stubs for deleted services ──────────────────────────
+
+export interface MedicalEntry {
+  id: string;
+  timestamp: number;
+  type: string;
+  structured: { what: string; urgent?: boolean };
+}
+
+export interface PatternSummary {
+  id: string;
+  patternType: string;
+  description: string;
+  confidence: number;
+  timeframe: string;
+}
+
+export interface KnowledgeEntry {
+  id: string;
+  title: string;
+  content: string;
+  source: 'file' | 'paste';
+  dateAdded: number;
+}
+
+export interface IndexProgress {
+  phase: 'scanning' | 'reading' | 'indexing' | 'done' | 'error';
+  filesFound: number;
+  filesProcessed: number;
+  conceptsExtracted: number;
+  currentFile?: string;
+  error?: string;
+}
+
+function entryTypeLabel(type: string): string { return type; }
+function entryTypeColor(type: string): string {
+  return type === 'symptom' ? '#ff6b6b' : type === 'medication' ? '#4db8ff' : '#00ff88';
+}
+function entryRelativeDate(ts: number): string {
+  const d = Date.now() - ts;
+  if (d < 86400000) return 'today';
+  if (d < 172800000) return 'yesterday';
+  return `${Math.floor(d / 86400000)}d ago`;
+}
+function patternTypeLabel(type: string): string { return type; }
+function patternTypeColor(_type: string): string { return '#a855f7'; }
+function confidenceBar(conf: number): string {
+  const filled = Math.round(conf * 10);
+  return '█'.repeat(filled) + '░'.repeat(10 - filled);
+}
+function relKbDate(ts: number): string {
+  const d = Date.now() - ts;
+  if (d < 86400000) return 'today';
+  return `${Math.floor(d / 86400000)}d ago`;
+}
+function fmtKbSize(content: string): string {
+  const kb = Math.round(content.length / 1024);
+  return kb < 1 ? '<1 KB' : `${kb} KB`;
+}
 
 const SIDEBAR_WIDTH = Math.round(Dimensions.get('window').width * 0.78);
 
@@ -77,6 +130,9 @@ export interface SidebarProps {
   onDeleteKbEntry: (id: string) => void;
   onIndexFolder: () => void;
   indexProgress: IndexProgress | null;
+  // Mac Mini host
+  ollamaHost: string;
+  onOllamaHostChange: (host: string) => void;
 }
 
 export default function Sidebar(props: SidebarProps) {
@@ -92,7 +148,10 @@ export default function Sidebar(props: SidebarProps) {
     sessionLocked, safeMode, onSetSessionLocked, onSetSafeMode,
     connectors, onToggleCalendar, onToggleNotes, onToggleReminders,
     kbEntries, kbPicking, onPickKbFile, onOpenKbPaste, onDeleteKbEntry, onIndexFolder, indexProgress,
+    ollamaHost, onOllamaHostChange,
   } = props;
+
+  const [hostDraft, setHostDraft] = useState(ollamaHost);
 
   if (!visible) return null;
 
@@ -283,10 +342,10 @@ export default function Sidebar(props: SidebarProps) {
               />
               <View>
                 <Text style={[s.connectorLabel, { color: localMode ? '#00ff00' : '#4499ff' }]}>
-                  {localMode ? 'Local (on-device)' : 'Cloud (Claude API)'}
+                  {localMode ? 'Local (Mac Mini)' : 'Cloud (Claude API)'}
                 </Text>
                 <Text style={s.connectorSub}>
-                  {localMode ? 'llama 3.2 3b · zero data leaves device' : 'claude sonnet · internet required'}
+                  {localMode ? 'llama 3.1 8b · mac mini · zero data leaves network' : 'claude sonnet · internet required'}
                 </Text>
               </View>
             </View>
@@ -358,6 +417,31 @@ export default function Sidebar(props: SidebarProps) {
                 <TouchableOpacity style={s.aiModeRetryBtn} onPress={onDownloadModel}>
                   <Ionicons name="refresh-outline" size={12} color="#ff4444" />
                   <Text style={s.aiModeRetryText}> retry</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {/* Mac Mini IP setting */}
+          {localMode && (
+            <View style={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 4 }}>
+              <Text style={[s.dimText, { marginBottom: 4 }]}>  mac mini host</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <TextInput
+                  style={{ flex: 1, fontFamily: FONT, fontSize: 12, color: '#00ff00', backgroundColor: '#0a0a0a', borderWidth: 1, borderColor: '#222', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 5 }}
+                  value={hostDraft}
+                  onChangeText={setHostDraft}
+                  onBlur={() => { if (hostDraft.trim()) onOllamaHostChange(hostDraft.trim()); }}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                  placeholder="192.168.x.x:11434"
+                  placeholderTextColor="#444"
+                />
+                <TouchableOpacity
+                  onPress={() => { if (hostDraft.trim()) onOllamaHostChange(hostDraft.trim()); }}
+                  style={{ paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: '#333', borderRadius: 4 }}>
+                  <Text style={{ fontFamily: FONT, fontSize: 11, color: '#888' }}>save</Text>
                 </TouchableOpacity>
               </View>
             </View>

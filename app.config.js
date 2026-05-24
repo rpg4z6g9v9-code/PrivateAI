@@ -1,18 +1,16 @@
-const appJson = require('./app.json');
-
 const IS_PRODUCTION = process.env.APP_VARIANT === 'production';
 
-module.exports = {
-  ...appJson.expo,
+module.exports = ({ config }) => ({
+  ...config,
   extra: {
-    ...appJson.expo.extra,
+    ...config.extra,
     claudeApiKey: process.env.EXPO_PUBLIC_CLAUDE_API_KEY,
     elevenLabsApiKey: process.env.EXPO_PUBLIC_ELEVENLABS_API_KEY,
     tavilyApiKey: process.env.EXPO_PUBLIC_TAVILY_API_KEY,
     appVariant: process.env.APP_VARIANT ?? 'development',
   },
   plugins: [
-    ...(appJson.expo.plugins ?? []),
+    ...(config.plugins ?? []),
     [
       'llama.rn',
       {
@@ -25,4 +23,4 @@ module.exports = {
     'expo-sqlite',
     'expo-local-authentication',
   ],
-};
+});

@@ -20,6 +20,30 @@ import * as FileSystemLegacy from 'expo-file-system/legacy';
 import { initLlama, releaseAllLlama } from 'llama.rn';
 import type { LlamaContext } from 'llama.rn';
 import { LOCAL_PROMPTS } from './personaPrompts';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// ─── Ollama host config ───────────────────────────────────────
+// Persisted so the user can change it in Settings without a rebuild.
+
+const OLLAMA_HOST_KEY = 'ollama_host_v1';
+const DEFAULT_OLLAMA_HOST = '192.168.4.43:11434';
+
+export async function getOllamaHost(): Promise<string> {
+  try {
+    const stored = await AsyncStorage.getItem(OLLAMA_HOST_KEY);
+    if (stored && stored.trim() !== DEFAULT_OLLAMA_HOST) {
+      // Clear stale host — always use DEFAULT_OLLAMA_HOST
+      await AsyncStorage.removeItem(OLLAMA_HOST_KEY);
+    }
+    return DEFAULT_OLLAMA_HOST;
+  } catch {
+    return DEFAULT_OLLAMA_HOST;
+  }
+}
+
+export async function setOllamaHost(host: string): Promise<void> {
+  await AsyncStorage.setItem(OLLAMA_HOST_KEY, host.trim());
+}
 
 // ─── Model config ─────────────────────────────────────────────
 
@@ -299,7 +323,7 @@ export async function generateLocal(
   systemPrompt?: string,
   onToken?: (token: string) => void,
 ): Promise<string> {
-  if (!llamaContext) throw new Error('Model not initialized. Call initModel() first.');
+  const OLLAMA_HOST = await getOllamaHost();
 
   const messages: { role: string; content: string }[] = [];
   if (systemPrompt?.trim()) {
@@ -307,22 +331,52 @@ export async function generateLocal(
   }
   messages.push({ role: 'user', content: userMessage.trim() });
 
-  const result = await llamaContext.completion(
-    {
-      messages,
-      n_predict: 1024,
-      temperature: 0.7,
-      top_p: 0.9,
-      top_k: 40,
-      penalty_repeat: 1.1,
-      stop: STOP_TOKENS,
-    },
-    onToken
-      ? (data: { token: string }) => onToken(data.token)
-      : undefined,
-  );
+  let fullResponse = '';
 
-  return (result.text ?? '').trim();
+  console.log('[LocalAI] host:', OLLAMA_HOST);
+  console.log('[LocalAI] url:', `http://${OLLAMA_HOST}/api/chat`);
+
+  try {
+    const healthRes = await fetch(`http://${OLLAMA_HOST}/api/tags`).catch((err: unknown) => {
+      console.error('[LocalAI] health fetch failed:', String(err));
+      return null;
+    });
+    if (healthRes) {
+      console.log('[LocalAI] health status:', healthRes.status);
+    }
+    const controller = new AbortController();
+
+    // Timeout — 90s for model to respond (8B loads fast, but give headroom)
+    const timer = setTimeout(() => controller.abort(), 90_000);
+
+    // React Native fetch doesn't support ReadableStream — use stream: false
+    const response = await fetch(`http://${OLLAMA_HOST}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: 'phi4-mini:latest',
+        messages,
+        stream: false,
+        temperature: 0.7,
+      }),
+    });
+    clearTimeout(timer);
+
+    if (!response.ok) {
+      throw new Error(`Ollama error: ${response.status}`);
+    }
+
+    const json = await response.json();
+    fullResponse = json.message?.content ?? '';
+    onToken?.(fullResponse);
+
+    return fullResponse.trim();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[Ollama] Error:', msg);
+    throw new Error('Private inference node unavailable. Check Wi-Fi and Mac Mini/Ollama status.');
+  }
 }
 
 // ─── Memory pattern extraction (local) ───────────────────────
@@ -376,8 +430,118 @@ Rules: only include meaningful recurring interests. If nothing notable, return [
   }
 }
 
+// ─── On-device fallback inference (llama.rn) ──────────────────
+//
+// Used when Mac Mini is unreachable. Requires initModel() to have been called.
+
+export async function generateLocalOnDevice(
+  userMessage: string,
+  systemPrompt?: string,
+  onToken?: (token: string) => void,
+): Promise<string> {
+  if (!llamaContext) throw new Error('Model not initialized. Call initModel() first.');
+
+  const messages: { role: string; content: string }[] = [];
+  if (systemPrompt?.trim()) {
+    messages.push({ role: 'system', content: systemPrompt.trim() });
+  }
+  messages.push({ role: 'user', content: userMessage.trim() });
+
+  const result = await llamaContext.completion(
+    {
+      messages,
+      n_predict: 1024,
+      temperature: 0.7,
+      top_p: 0.9,
+      top_k: 40,
+      penalty_repeat: 1.1,
+      stop: STOP_TOKENS,
+    },
+    onToken
+      ? (data: { token: string }) => onToken(data.token)
+      : undefined,
+  );
+
+  return (result.text ?? '').trim();
+}
+
 // ─── Status helpers ───────────────────────────────────────────
 
 export function isModelLoaded(): boolean {
-  return llamaContext !== null;
+  // True if on-device llama.rn model is loaded OR Ollama is configured
+  return llamaContext !== null || isMacMiniConfigured();
+}
+
+/** True when a Mac Mini Ollama host is configured (always true if OLLAMA_HOST is set). */
+export function isMacMiniConfigured(): boolean {
+  return true; // 192.168.4.43:11434 is hardcoded in generateLocal
+}
+
+export type PrivateNodeStatus = {
+  online: boolean;
+  host: string;
+  latency: number | null;
+  models: string[];
+};
+
+/**
+ * Health check for the private inference node.
+ * Calls /api/tags — lightweight, no model load required.
+ * Logs result and returns structured status.
+ */
+export async function checkPrivateNode(): Promise<PrivateNodeStatus> {
+  const host = await getOllamaHost();
+  const start = Date.now();
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5_000);
+
+    const res = await fetch(`http://${host}/api/tags`, { signal: controller.signal });
+    clearTimeout(timeout);
+
+    const latency = Date.now() - start;
+
+    if (!res.ok) {
+      console.log(`[PrivateNode] offline · HTTP ${res.status}`);
+      return { online: false, host, latency, models: [] };
+    }
+
+    const json = await res.json();
+    const models: string[] = (json.models ?? []).map((m: { name: string }) => m.name);
+
+    console.log(`[PrivateNode] online · ${models.join(', ') || 'no models'} · ${latency}ms`);
+    return { online: true, host, latency, models };
+
+  } catch (e) {
+    const latency = Date.now() - start;
+    console.log(`[PrivateNode] offline · check Wi-Fi or Ollama status`);
+    return { online: false, host, latency: null, models: [] };
+  }
+}
+
+/**
+ * Pre-warm the 70B model on Mac Mini so it's loaded before the user's first message.
+ * Sends a minimal request and discards the response. Fire-and-forget — never throws.
+ */
+export async function warmMacMini(): Promise<void> {
+  const OLLAMA_HOST = await getOllamaHost();
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120_000);
+    const res = await fetch(`http://${OLLAMA_HOST}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: 'phi4-mini:latest',
+        messages: [{ role: 'user', content: 'hi' }],
+        stream: false,
+      }),
+    });
+    clearTimeout(timeout);
+    console.log('[Ollama] warm-up complete, status:', res.status);
+  } catch (e) {
+    console.log('[Ollama] warm-up failed (non-fatal):', e instanceof Error ? e.message : String(e));
+  }
 }

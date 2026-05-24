@@ -2,79 +2,63 @@
   "expo": {
     "name": "PrivateAI",
     "slug": "privateai",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "privateai",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "buildNumber": "1",
+      "buildNumber": "2",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "PrivateAI uses the microphone for voice input to your AI personas. Audio is processed on-device.",
-        "NSSpeechRecognitionUsageDescription": "PrivateAI uses speech recognition to convert your voice to text. Processing happens on-device.",
-        "NSCalendarsUsageDescription": "PrivateAI reads your calendar to provide schedule-aware AI responses. Calendar data never leaves your device.",
-        "NSCalendarsFullAccessUsageDescription": "PrivateAI needs full calendar access to read events and create new ones on your behalf. Data stays on-device.",
-        "NSRemindersUsageDescription": "PrivateAI accesses reminders to help you track tasks. Reminder data never leaves your device.",
-        "NSRemindersFullAccessUsageDescription": "PrivateAI needs full reminders access to read and create reminders. Data stays on-device.",
-        "NSPhotoLibraryUsageDescription": "PrivateAI accesses your photo library to attach images for AI analysis. Images are processed locally when possible.",
-        "NSCameraUsageDescription": "PrivateAI uses the camera to capture images for AI analysis. Photos are processed locally when possible.",
-        "NSFaceIDUsageDescription": "PrivateAI uses Face ID to protect your private data vault, including medical records and personal memory.",
-        "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": ["fetch"]
+        "NSMicrophoneUsageDescription": "PrivateAI uses your microphone for voice input. Audio is processed on-device only.",
+        "NSSpeechRecognitionUsageDescription": "PrivateAI uses speech recognition to convert voice to text. Processing happens on-device.",
+        "NSPhotoLibraryUsageDescription": "PrivateAI accesses your photo library to attach images for analysis.",
+        "NSCameraUsageDescription": "PrivateAI uses the camera to capture images for analysis.",
+        "NSFaceIDUsageDescription": "PrivateAI uses Face ID to encrypt and protect your private data vault.",
+        "ITSAppUsesNonExemptEncryption": false
       },
-      "bundleIdentifier": "com.chowmein97sorganization.privateai"
+      "bundleIdentifier": "com.chowmein97sorganization.privateai",
+      "entitlements": {
+        "com.apple.developer.kernel.extended-virtual-addressing": true,
+        "com.apple.developer.kernel.increased-memory-limit": true
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#080d14",
+        "foregroundImage": "./assets/images/icon.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false,
       "permissions": [
-        "android.permission.RECORD_AUDIO",
-        "android.permission.READ_CALENDAR",
-        "android.permission.WRITE_CALENDAR"
+        "android.permission.RECORD_AUDIO"
       ],
       "package": "com.chowmein97sorganization.privateai"
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/icon.svg"
     },
     "plugins": [
       "expo-router",
       [
-        "expo-calendar",
-        {
-          "calendarPermission": "PrivateAI reads your calendar to inject schedule context into AI conversations. Nothing leaves your device.",
-          "remindersPermission": "PrivateAI needs access to your reminders to help you stay on track. Nothing leaves your device."
-        }
-      ],
-      "expo-document-picker",
-      [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
-          "dark": {
-            "backgroundColor": "#000000"
-          }
+          "backgroundColor": "#080d14"
         }
       ]
     ],
     "experiments": {
-      "typedRoutes": true,
-      "reactCompiler": true
+      "typedRoutes": true
     },
     "extra": {
-      "router": {},
+      "router": {
+        "origin": false
+      },
       "eas": {
         "projectId": "7ac02962-765a-4774-afd3-4c13576655f8"
       }

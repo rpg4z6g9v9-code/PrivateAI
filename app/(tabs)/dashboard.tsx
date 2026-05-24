@@ -33,19 +33,16 @@ import {
   type NetworkCallEntry,
   DEST_LABEL,
 } from '@/services/networkMonitor';
-import {
-  getEntries,
-  entryTypeLabel,
-  entryTypeColor,
-  entryRelativeDate,
-  checkUrgent,
-  type MedicalEntry,
-} from '@/services/medicalMemory';
-import {
-  getGraphSummary,
-  getTopInsights,
-  type GraphSummary,
-} from '@/services/knowledgeGraph';
+// Stubs for deleted services
+type MedicalEntry = { id: string; timestamp: number; type: string; rawInput: string; tags?: string[]; structured: { what: string; urgent?: boolean } };
+interface GraphSummary { nodeCount: number; edgeCount: number; topTopics: string[]; topicCount: number; preferenceCount: number; milestoneCount: number; confirmedCount: number }
+async function getEntries(): Promise<MedicalEntry[]> { return []; }
+function entryTypeLabel(t: string): string { return t; }
+function entryTypeColor(_t: string): string { return '#4db8a4'; }
+function entryRelativeDate(ts: number): string { return new Date(ts).toLocaleDateString(); }
+function checkUrgent(_input: string): boolean { return false; }
+async function getGraphSummary(): Promise<GraphSummary> { return { nodeCount: 0, edgeCount: 0, topTopics: [], topicCount: 0, preferenceCount: 0, milestoneCount: 0, confirmedCount: 0 }; }
+async function getTopInsights(_n: number): Promise<string> { return ''; }
 
 const FONT = Platform.OS === 'ios' ? 'Courier New' : 'monospace';
 
@@ -141,9 +138,13 @@ export default function DashboardScreen() {
   const [medEntries, setMedEntries] = useState<MedicalEntry[]>([]);
   const [urgentItems, setUrgentItems] = useState<MedicalEntry[]>([]);
 
+  // Security status
+  const [secStatus, setSecStatus] = useState<{ sessionState: string }>({ sessionState: 'normal' });
+
   // Knowledge
   const [kgStats, setKgStats] = useState<GraphSummary>({
-    nodeCount: 0, topicCount: 0, preferenceCount: 0,
+    nodeCount: 0, edgeCount: 0, topTopics: [],
+    topicCount: 0, preferenceCount: 0,
     milestoneCount: 0, confirmedCount: 0,
   });
   const [topInsights, setTopInsights] = useState<string[]>([]);
@@ -251,8 +252,6 @@ export default function DashboardScreen() {
       });
     }, [])
   );
-
-  const secStatus = getSecurityStatus();
 
   // ElevenLabs computed
   const selectedVoiceName = elVoiceId

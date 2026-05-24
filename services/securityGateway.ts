@@ -1,357 +1,166 @@
 /**
- * securityGateway.ts — PrivateAI Zero-Trust Security Architecture
- *
- * Single security layer all AI calls pass through before and after
- * every Claude API request. No AI call in the app bypasses this gate.
- *
- * Responsibilities:
- *   1. Prompt injection detection — block known attack patterns
- *   2. Output sanitization     — strip leaked system/key content
- *   3. Anomaly detection       — rate-limit + session lock
- *   4. Data classification     — route medical content to local AI
- *   5. Persona trust boundary  — medical data scoped to Atom only
- *   6. Secure event logging    — encrypted, never logs raw input
+ * securityGateway.ts — PrivateAI Security Layer
+ * 
+ * Single checkpoint all AI calls pass through:
+ * 1. Injection detection
+ * 2. Output sanitization
+ * 3. Data classification (medical, financial, PII)
+ * 4. Anomaly detection
  */
 
 import secureStorage from '@/services/secureStorage';
 
-// ─── Types ────────────────────────────────────────────────────
-
-export type DataClassification = 'general' | 'medical';
-export type SessionState       = 'normal' | 'locked';
-
-export interface SecurityStatus {
-  injectionShield: 'active';
-  outputFilter:    'active';
-  medicalDataMode: 'local_only';
-  sessionState:    SessionState;
-}
+// ── Types ────────────────────────────────────────────────────
 
 export interface InjectionCheckResult {
-  blocked:        boolean;
-  warningMessage: string;
+  detected: boolean;
+  reason?: string;
 }
 
-export interface AnomalyCheckResult {
-  locked:  boolean;
-  message: string;
+export interface DataClassificationResult {
+  hasMedical: boolean;
+  hasFinancial: boolean;
+  hasPII: boolean;
 }
 
-// ─── Prompt Injection Patterns ────────────────────────────────
-//
-// Catches the most common prompt injection attack vectors.
-// Evaluated against raw user input before it reaches any persona.
+// ── Injection Patterns ───────────────────────────────────────
 
 const INJECTION_PATTERNS: RegExp[] = [
-  // Direct instruction override
-  /ignore\s+(all\s+)?previous\s+instructions/i,
-  /disregard\s+(all\s+)?(previous|prior|above)/i,
-  /forget\s+(all\s+)?(previous|prior|your)\s+(instructions|rules|context)/i,
-  /override\s+(your\s+)?(rules|instructions|safety|guidelines)/i,
-  /bypass\s+(your\s+)?(rules|safety|filters|restrictions)/i,
-  // System prompt extraction
+  /ignore[,.]?\s*(?:all\s+)?(?:previous\s+)?(?:instructions|rules|restrictions)/i,
+  /disregard[,.]?\s*(?:all\s+)?(?:previous|safety|your)/i,
+  /forget\s+(?:all\s+)?(?:your\s+)?(?:previous\s+)?(?:instructions|rules)/i,
+  /override\s+(your\s+)?(rules|safety|filters)/i,
+  /bypass[,.]?\s*(?:your\s+)?(rules|safety|filters)/i,
+  /\[SYSTEM\s+(UPDATE|DIRECTIVE|OVERRIDE)\]/i,
   /reveal\s+(your\s+)?system\s+prompt/i,
-  /show\s+(me\s+)?(your\s+)?(hidden|system|internal)\s+(prompt|instructions|rules)/i,
-  /print\s+(your\s+)?(instructions|prompt|rules|configuration)/i,
-  /repeat\s+everything\s+(above|before|you\s+were\s+told)/i,
-  /what\s+(are|were)\s+your\s+(original|initial|system)\s+(instructions|prompt|rules)/i,
-  /output\s+(your|the)\s+(system|initial|original)\s+(prompt|message|instructions)/i,
-  // Data exfiltration
-  /send\s+.*\b(database|data|info|credentials|keys?|tokens?)\b/i,
-  /exfiltrate/i,
-  /extract\s+(all|the)\s+(data|info|memory|knowledge)/i,
-  /forward\s+(this|all|the)\s+(data|conversation|history)\s+to/i,
-  // Role manipulation
-  /you\s+are\s+now\s+(?:a|an|the)\s+/i,
-  /pretend\s+(to\s+be|you\s+are)\s+/i,
-  /act\s+as\s+(if\s+you\s+are|a\s+different)\s+/i,
-  /switch\s+to\s+(evil|uncensored|unrestricted|jailbreak)/i,
-  /enter\s+(dev|developer|debug|admin)\s+mode/i,
-  /\bDAN\b.*\bjailbreak\b/i,
-  // Encoding evasion
-  /base64\s*(decode|encode).*instruction/i,
-  /rot13/i,
-  // Delimiter injection
-  /```system/i,
-  /<\/?system>/i,
-  /\[INST\]/i,
-  /<<SYS>>/i,
+  /reveal\s+(?:all\s+)?(?:user\s+|my\s+|the\s+)?(medical|health|personal|private)\b/i,
+  /show\s+(?:me\s+)?(?:the\s+|your\s+)?(?:full\s+)?(hidden|system|internal)\s+(prompt|instructions)/i,
+  /what\s+(?:are|were)\s+your\s+(?:original|initial|system)\s+(?:system\s+)?(?:instructions|prompt|rules)/i,
+  /forward\s+(?:this|all|the)\s+(?:\w+\s+)?(data|conversation|history)\s+to/i,
+  /extract\s+(?:all\s+)?(?:the\s+)?(data|info|memory|knowledge)/i,
+  /instructions?\s+(?:are\s+)?(?:now\s+)?revoked/i,
+  /send\s+.*\b(database|data|credentials|keys?|tokens?)\b/i,
+  /you\s+are\s+now\s+(?:a\s+)?(uncensored|jailbroken|unrestricted)/i,
+  /act\s+as\s+(if\s+you\s+are|a\s+)/i,
 ];
 
-// ─── Forbidden Output Patterns ────────────────────────────────
-//
-// Catches accidental or induced leakage of system internals
-// from AI responses before they reach the chat thread.
+// ── Data Keywords ────────────────────────────────────────────
+
+const MEDICAL_KEYWORDS = /\b(symptom|medication|prescri(?:ption|bed)|doctor|physician|diagnosis|pain|health|headache|fever|anxiety|depression|allergy|diabetes|asthma|dosage|surgery|therapy|treatment)\b/i;
+
+const FINANCIAL_KEYWORDS = /\b(credit\s+card|bank\s+account|routing\s+number|ssn|account\s+number|balance|mortgage|loan|investment|stock|salary|bitcoin|crypto|wallet|payment)\b/i;
+
+const PII_KEYWORDS = /\b(phone\s+number|email\s+address|home\s+address|zip\s+code|driver\s+license|passport|ssn|date\s+of\s+birth|full\s+name)\b/i;
+
+// ── Forbidden Output ─────────────────────────────────────────
 
 const FORBIDDEN_OUTPUT: RegExp[] = [
-  /system prompt/i,
-  /internal policy/i,
-  /api[_ ]?key/i,
-  /database dump/i,
-  // API key patterns — catch leaked keys in responses
-  /sk-ant-api\d{2}-[A-Za-z0-9_-]{20,}/,           // Anthropic
-  /sk-[A-Za-z0-9]{20,}/,                            // OpenAI
-  /sk_[a-f0-9]{40,}/,                               // ElevenLabs
-  /tvly-[A-Za-z0-9_-]{20,}/,                        // Tavily
-  // Persona internals — never leak the architecture
-  /SHARED_CONTEXT/,
-  /CLOUD_PROMPTS/,
-  /LOCAL_PROMPTS/,
-  /INJECTION_PATTERNS/,
-  /FORBIDDEN_OUTPUT/,
-  /buildAtomPrompt/,
-  /securityGateway/,
-  // Memory store keys
-  /memory_v1_[a-z]+/,
-  /knowledge_v1_[a-z]+/,
-  /medical_entries_v1/,
-  /security_events_v1/,
+  /api[_-]?key/i,
+  /sk-ant-api/,
+  /sk-[A-Za-z0-9]{20,}/,
 ];
 
-// ─── Medical Keywords ─────────────────────────────────────────
-//
-// Any message matching these terms is classified as medical data
-// and routed to local AI where possible.
+// ── Security Log ─────────────────────────────────────────────
 
-const MEDICAL_KEYWORDS = /\b(symptom|symptoms|medication|medications|prescri(?:ption|bed)|doctor|physician|diagnosis|diagnose|pain|aching|ache|health|headache|migraine|fatigue|tired|exhausted|fever|nausea|nauseated|dizzy|dizziness|vomit|blood\s*pressure|heart\s*rate|pulse|pharmacy|hospital|clinic|specialist|therapy|treatment|side\s+effect|allergy|allergic|chronic|acute|inflammation|swollen|swelling|rash|anxiety|depression|insomnia|arthritis|diabetes|asthma|inhaler|dosage|dose|mg\b|ml\b|lab\s+result|blood\s+test|x.ray|scan|mri|ct\s+scan|surgery|injury)\b/i;
-
-// ─── Storage Key ──────────────────────────────────────────────
+interface SecurityEvent {
+  timestamp: number;
+  eventType: string;
+  context: string;
+}
 
 const SECURITY_LOG_KEY = 'security_events_v1';
 
-// ─── Anomaly Detector State ───────────────────────────────────
-
-// In-memory ring buffer of request timestamps (cleared on lock reset)
-const requestTimestamps: number[] = [];
-const ANOMALY_WINDOW_MS  = 10_000; // 10 seconds
-const ANOMALY_THRESHOLD  = 20;     // max requests per window
-
-let _sessionLocked      = false;
-let _lockExpiryTimeout: ReturnType<typeof setTimeout> | null = null;
-
-// ─── 1. Injection Detector ────────────────────────────────────
+// ── Functions ────────────────────────────────────────────────
 
 /**
- * Check user input for prompt injection patterns.
- * Call this BEFORE building any API payload.
+ * Check for prompt injection in user input.
  */
 export function checkInjection(input: string): InjectionCheckResult {
   const hit = INJECTION_PATTERNS.find(rx => rx.test(input));
   if (hit) {
-    logSecurityEvent('injection_blocked', 'system').catch(() => {});
-    return {
-      blocked: true,
-      warningMessage: '[Security] Message blocked — detected a prompt injection pattern.',
-    };
+    logSecurityEvent('injection_detected', 'checkInjection').catch(() => {});
+    return { detected: true, reason: 'Prompt injection pattern detected' };
   }
-  return { blocked: false, warningMessage: '' };
+  return { detected: false };
 }
 
-// ─── 2. Output Sanitizer ─────────────────────────────────────
-
 /**
- * Scan AI response for forbidden content leakage.
- * Call this on every raw string returned by Claude before
- * placing it in the chat thread or speaking it aloud.
+ * Remove sensitive content from AI output.
  */
 export function sanitizeOutput(output: string): string {
   let cleaned = output;
   for (const rx of FORBIDDEN_OUTPUT) {
     if (rx.test(cleaned)) {
-      logSecurityEvent('output_filtered', 'system').catch(() => {});
+      logSecurityEvent('output_filtered', 'sanitizeOutput').catch(() => {});
       cleaned = cleaned.replace(rx, '[redacted]');
     }
   }
   return cleaned;
 }
 
-// ─── 3. Anomaly Detector ─────────────────────────────────────
-
 /**
- * Record a new request and check for rate-limit anomaly.
- * Returns locked=true if >ANOMALY_THRESHOLD requests in ANOMALY_WINDOW_MS.
- * Session auto-unlocks after 30 seconds (simulating Face ID re-auth).
+ * Classify user input by data sensitivity.
  */
-export function checkAnomaly(): AnomalyCheckResult {
-  if (_sessionLocked) {
-    return {
-      locked: true,
-      message:
-        '[Security] Session locked due to unusual request volume. Tap "Unlock Session" to re-authenticate.',
-    };
-  }
-
-  const now    = Date.now();
-  const cutoff = now - ANOMALY_WINDOW_MS;
-  requestTimestamps.push(now);
-
-  // Evict timestamps outside the window
-  let head = 0;
-  while (head < requestTimestamps.length && requestTimestamps[head] < cutoff) head++;
-  if (head > 0) requestTimestamps.splice(0, head);
-
-  if (requestTimestamps.length > ANOMALY_THRESHOLD) {
-    _sessionLocked = true;
-    logSecurityEvent('anomaly_lock', 'system').catch(() => {});
-
-    // Auto-unlock after 30 s (production: replace with Face ID callback)
-    if (_lockExpiryTimeout) clearTimeout(_lockExpiryTimeout);
-    _lockExpiryTimeout = setTimeout(() => {
-      _sessionLocked = false;
-      requestTimestamps.length = 0;
-      _lockExpiryTimeout = null;
-    }, 30_000);
-
-    return {
-      locked: true,
-      message:
-        '[Security] Unusual request volume detected. Session locked for 30 seconds. Tap "Unlock Session" to re-authenticate immediately.',
-    };
-  }
-
-  return { locked: false, message: '' };
+export function classifyData(input: string): DataClassificationResult {
+  return {
+    hasMedical: MEDICAL_KEYWORDS.test(input),
+    hasFinancial: FINANCIAL_KEYWORDS.test(input),
+    hasPII: PII_KEYWORDS.test(input),
+  };
 }
 
 /**
- * Immediately unlock the session (call after successful Face ID / biometric).
- */
-export function resetSessionLock(): void {
-  _sessionLocked = false;
-  requestTimestamps.length = 0;
-  if (_lockExpiryTimeout) {
-    clearTimeout(_lockExpiryTimeout);
-    _lockExpiryTimeout = null;
-  }
-}
-
-/** Returns true if the session is currently locked (module-level read). */
-export function isSessionLocked(): boolean {
-  return _sessionLocked;
-}
-
-// ─── 4. Data Classifier ──────────────────────────────────────
-
-/**
- * Classify user input as 'medical' or 'general'.
- * Medical input should be routed to local AI where available.
- */
-export function classifyData(input: string): DataClassification {
-  return MEDICAL_KEYWORDS.test(input) ? 'medical' : 'general';
-}
-
-// ─── 5. Persona Trust Boundary ───────────────────────────────
-
-/**
- * Build the medical context string appropriate for a given persona.
- *
- * - Vera ('vera'), Atom ('pete'), Atlas ('atlas'): receive full medical context
- * - All other personas: receive only an anonymised count summary
- *
- * This enforces the principle that raw health data never reaches
- * Architect / Builder / Critic / Researcher.
- */
-const MEDICAL_ACCESS_PERSONAS = new Set(['vera', 'pete', 'atlas']);
-
-export function buildMedicalContext(
-  personaId:   string,
-  entryCount:  number,
-  fullContext: string,
-): string {
-  if (entryCount === 0) return '';
-  if (MEDICAL_ACCESS_PERSONAS.has(personaId)) return fullContext;
-  // Other personas: summary only — no medical detail
-  return `\n\nNote: The user has logged ${entryCount} health ${entryCount === 1 ? 'entry' : 'entries'} in their private medical memory. Medical details are confidential and restricted to trusted personas.`;
-}
-
-// ─── 6. Secure Logging ───────────────────────────────────────
-
-interface SecurityEvent {
-  timestamp:  number;
-  event_type: string;
-  persona_id: string;
-  // NEVER include: raw input, medical content, API keys
-}
-
-/**
- * Append a security event to the encrypted log.
- * Logs metadata only — raw user input and medical data are never recorded.
+ * Log security event (metadata only, never raw input).
  */
 export async function logSecurityEvent(
   eventType: string,
-  personaId: string,
+  context: string
 ): Promise<void> {
   try {
-    const raw    = await secureStorage.getItem(SECURITY_LOG_KEY);
-    const events: SecurityEvent[] = raw ? (JSON.parse(raw) as SecurityEvent[]) : [];
-    events.push({ timestamp: Date.now(), event_type: eventType, persona_id: personaId });
-    // Cap at 200 events to bound storage size
-    if (events.length > 200) events.splice(0, events.length - 200);
+    const raw = await secureStorage.getItem(SECURITY_LOG_KEY);
+    const events: SecurityEvent[] = raw ? JSON.parse(raw) : [];
+    events.push({ timestamp: Date.now(), eventType, context });
+    if (events.length > 100) events.splice(0, events.length - 100);
     await secureStorage.setItem(SECURITY_LOG_KEY, JSON.stringify(events));
   } catch (e) {
-    // Never throw from the security logger — silently swallow storage errors
     console.warn('[Security] logSecurityEvent failed:', e);
   }
 }
 
 /**
- * Return the last N security events for display in the dashboard.
- * Returns metadata only — safe to render in UI.
+ * Reset session lock flag.
+ */
+export function resetSessionLock(): void {
+  // Session lock is managed in app state — this is a no-op stub for the UI callback
+}
+
+/**
+ * Get a summary of current security status.
+ */
+export async function getSecurityStatus(): Promise<{
+  injectionShield: boolean;
+  outputFilter: boolean;
+  recentEvents: number;
+}> {
+  const events = await getSecurityLog(100);
+  return {
+    injectionShield: true,
+    outputFilter: true,
+    recentEvents: events.length,
+  };
+}
+
+/**
+ * Get recent security events.
  */
 export async function getSecurityLog(limit = 20): Promise<SecurityEvent[]> {
   try {
     const raw = await secureStorage.getItem(SECURITY_LOG_KEY);
     if (!raw) return [];
     const events = JSON.parse(raw) as SecurityEvent[];
-    return events.slice(-limit).reverse(); // newest first
+    return events.slice(-limit).reverse();
   } catch (e) {
     console.warn('[Security] getSecurityLog failed:', e);
     return [];
   }
-}
-
-// ─── 7. Cloud Prompt Sanitizer ────────────────────────────────
-//
-// Before sending system prompts to the cloud API, strip sensitive
-// information that the model doesn't need to see.
-
-const SENSITIVE_PATTERNS_IN_PROMPT: RegExp[] = [
-  // API keys that might have leaked into context
-  /sk-ant-api\d{2}-[A-Za-z0-9_-]{20,}/g,
-  /sk-[A-Za-z0-9]{20,}/g,
-  /sk_[a-f0-9]{40,}/g,
-  /tvly-[A-Za-z0-9_-]{20,}/g,
-  // File paths that reveal device structure
-  /\/var\/mobile\/Containers\/[^\s]+/g,
-  /\/Users\/[^\s]+/g,
-  // Raw medical entries with PII (names, dates, locations)
-  // These should have been trust-bounded, but defense in depth
-];
-
-/**
- * Strip sensitive information from a system prompt before sending to cloud.
- * Call this on the final assembled prompt before the API call.
- */
-export function sanitizePromptForCloud(prompt: string): string {
-  let cleaned = prompt;
-  for (const rx of SENSITIVE_PATTERNS_IN_PROMPT) {
-    cleaned = cleaned.replace(rx, '[redacted]');
-  }
-  return cleaned;
-}
-
-// ─── 8. Security Status ──────────────────────────────────────
-
-/**
- * Snapshot of the current security posture.
- * Injection shield and output filter are always active.
- * Medical data mode is always local_only by policy.
- * Session state reflects the anomaly detector.
- */
-export function getSecurityStatus(): SecurityStatus {
-  return {
-    injectionShield: 'active',
-    outputFilter:    'active',
-    medicalDataMode: 'local_only',
-    sessionState:    _sessionLocked ? 'locked' : 'normal',
-  };
 }

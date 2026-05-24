@@ -154,10 +154,10 @@ function ClassifyRow({ entry }: { entry: ClassificationEntry }) {
 
 // ── Security event row ────────────────────────────────────────
 
-function EventRow({ event }: { event: { timestamp: number; event_type: string; persona_id: string } }) {
-  const icon  = eventIcon(event.event_type);
-  const color = eventColor(event.event_type);
-  const label = eventLabel(event.event_type);
+function EventRow({ event }: { event: { timestamp: number; eventType: string; context: string } }) {
+  const icon  = eventIcon(event.eventType);
+  const color = eventColor(event.eventType);
+  const label = eventLabel(event.eventType);
 
   return (
     <View style={styles.logRow}>
@@ -165,8 +165,8 @@ function EventRow({ event }: { event: { timestamp: number; event_type: string; p
       <View style={styles.logContent}>
         <View style={styles.logMeta}>
           <Text style={styles.logTime}>{fmtTime(event.timestamp)}</Text>
-          {event.persona_id && event.persona_id !== 'system' && (
-            <Text style={styles.personaTag}>{event.persona_id}</Text>
+          {event.context && event.context !== 'system' && (
+            <Text style={styles.personaTag}>{event.context}</Text>
           )}
         </View>
         <Text style={[styles.logDesc, { color }]}>{label}</Text>
@@ -238,24 +238,26 @@ function StorageTab() {
     await new Promise(r => setTimeout(r, 600)); // visual delay
     const injCheck  = checkInjection(fakeInput);
     const dataClass = classifyData(fakeInput);
-    const route     = dataClass === 'medical' ? 'local' : 'cloud';
-    const blocked   = dataClass === 'medical';
+    const isMedical = dataClass.hasMedical;
+    const route     = isMedical ? 'local' : 'cloud';
+    const blocked   = isMedical;
+    const classLabel = isMedical ? 'medical' : 'general';
 
     // Log the test events
     networkMonitor.logClassification({
-      classification: dataClass as 'medical' | 'general',
+      classification: classLabel as 'medical' | 'general',
       route,
-      description: `[SECURITY TEST] fake medical query — classified ${dataClass.toUpperCase()}, routed ${route.toUpperCase()}`,
+      description: `[SECURITY TEST] fake medical query — classified ${classLabel.toUpperCase()}, routed ${route.toUpperCase()}`,
     });
     await logSecurityEvent('security_self_test', 'system');
 
     setTestResult({
       input:          fakeInput,
-      classification: dataClass,
+      classification: classLabel,
       route,
       cloudBlocked:   blocked,
-      injectionCheck: injCheck.blocked ? 'BLOCKED' : 'clean',
-      passed:         blocked && !injCheck.blocked,
+      injectionCheck: injCheck.detected ? 'BLOCKED' : 'clean',
+      passed:         blocked && !injCheck.detected,
     });
     setTestRunning(false);
   }, [testPulse]);
@@ -398,7 +400,7 @@ export default function SecurityScreen() {
   const [activeTab, setActiveTab]           = useState<Tab>('network');
   const [calls, setCalls]                   = useState<NetworkCallEntry[]>([]);
   const [classifications, setClassifications] = useState<ClassificationEntry[]>([]);
-  const [secEvents, setSecEvents]           = useState<{ timestamp: number; event_type: string; persona_id: string }[]>([]);
+  const [secEvents, setSecEvents]           = useState<{ timestamp: number; eventType: string; context: string }[]>([]);
   const [medicalAlert, setMedicalAlert]     = useState(false);
   const netScrollRef   = useRef<ScrollView>(null);
   const classScrollRef = useRef<ScrollView>(null);
