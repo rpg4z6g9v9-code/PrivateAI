@@ -258,6 +258,11 @@ export default function ChatScreen() {
     try {
       setIsLoading(true);
 
+      // Fresh node check before every send — badge and routing must reflect current state
+      setNodeStatus(null); // show "checking" while in-flight
+      const freshStatus = await checkPrivateNode();
+      setNodeStatus(freshStatus);
+
       const userMsg: Message = {
         id: `${Date.now()}_user`,
         role: 'user',
@@ -277,7 +282,7 @@ export default function ChatScreen() {
         })) as ConversationMessage[],
         isSensitive,
         safeMode,
-        nodeOnline: nodeStatus?.online,
+        nodeOnline: freshStatus.online,
       });
 
       const reply = sanitizeOutput(result.text);
