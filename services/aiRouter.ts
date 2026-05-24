@@ -27,13 +27,17 @@ Keep responses concise and clear.`;
 // ── Route Decision ───────────────────────────────────────────
 
 export async function routeAI(params: AIRouteParams): Promise<AIRouteResult> {
-  const { messages, isSensitive, safeMode } = params;
+  const { messages, isSensitive, safeMode, nodeOnline } = params;
 
   // Rule 1: Sensitive data (medical/financial/PII) → always local if available
   if (isSensitive) {
+    if (nodeOnline === false) {
+      throw new Error(
+        'Cannot send sensitive data to cloud. Private node is offline. Reconnect to your local network or remove sensitive content.'
+      );
+    }
     const localResult = await tryLocalRoute(messages);
     if (localResult) return localResult;
-    // Fallback: reject cloud route, force user to acknowledge
     throw new Error(
       'Cannot send sensitive data to cloud. Local AI not available. Enable on-device processing or remove sensitive content.'
     );
@@ -41,6 +45,11 @@ export async function routeAI(params: AIRouteParams): Promise<AIRouteResult> {
 
   // Rule 2: Safe mode (injection detected) → local only
   if (safeMode) {
+    if (nodeOnline === false) {
+      throw new Error(
+        'Cloud features disabled due to security event. Private node is offline — cannot process request.'
+      );
+    }
     const localResult = await tryLocalRoute(messages);
     if (localResult) return localResult;
     throw new Error(
@@ -48,12 +57,16 @@ export async function routeAI(params: AIRouteParams): Promise<AIRouteResult> {
     );
   }
 
-  // Rule 3: Local-first (general queries)
+  // Rule 3: Local-first — skip attempt if node is known offline
+  if (nodeOnline === false) {
+    console.log('[Router] Node known offline — routing direct to cloud');
+    return await cloudRoute(messages);
+  }
+
   console.log('[Router] Routing: local');
   const localResult = await tryLocalRoute(messages);
   if (localResult) return localResult;
 
-  // Cloud fallback if local unavailable or fails
   console.log('[Router] Routing: cloud fallback');
   return await cloudRoute(messages);
 }

@@ -48,4 +48,5 @@ export interface AIRouteParams {
   messages: ConversationMessage[];
   isSensitive: boolean;
   safeMode: boolean;
+  nodeOnline?: boolean; // pre-checked node status — skip local attempt if false
 }

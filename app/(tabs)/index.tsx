@@ -26,7 +26,7 @@ import { networkMonitor } from '@/services/networkMonitor';
 import { checkInjection, sanitizeOutput, classifyData, logSecurityEvent } from '@/services/securityGateway';
 import { canAccessVault, unlockVault, lockVault } from '@/services/dataVault';
 import { routeAI } from '@/services/aiRouter';
-import { checkPrivateNode } from '@/services/localAI';
+import { checkPrivateNode, type PrivateNodeStatus } from '@/services/localAI';
 import type { ConversationMessage } from '@/services/claude';
 import { AppState, type AppStateStatus } from 'react-native';
 import Constants from 'expo-constants';
@@ -81,6 +81,9 @@ export default function ChatScreen() {
   const [safeMode, setSafeMode] = useState(false);
   const backgroundedAt = useRef<number | null>(null);
 
+  // Node status
+  const [nodeStatus, setNodeStatus] = useState<PrivateNodeStatus | null>(null);
+
   // UI state
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const sidebarX = useRef(new Animated.Value(-200)).current;
@@ -109,8 +112,10 @@ export default function ChatScreen() {
   }, []);
 
   // Background lock: if backgrounded > 5 min, re-lock on return
+  // Also refresh node status when app comes to foreground
   useEffect(() => {
     authenticate();
+    checkPrivateNode().then(setNodeStatus);
 
     const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
       if (next === 'background' || next === 'inactive') {
@@ -123,6 +128,8 @@ export default function ChatScreen() {
           setAuthLocked(true);
           authenticate();
         }
+        // Refresh node status every time the app returns to foreground
+        checkPrivateNode().then(setNodeStatus);
       }
     });
 
@@ -139,11 +146,6 @@ export default function ChatScreen() {
         console.warn('[Chat] Load history failed:', e);
       }
     })();
-  }, []);
-
-  // ── Private node health check on mount ───────────────────────────
-  useEffect(() => {
-    checkPrivateNode();
   }, []);
 
   // ── Loading dots animation ─────────────────────────────────────
@@ -275,6 +277,7 @@ export default function ChatScreen() {
         })) as ConversationMessage[],
         isSensitive,
         safeMode,
+        nodeOnline: nodeStatus?.online,
       });
 
       const reply = sanitizeOutput(result.text);
@@ -381,7 +384,16 @@ export default function ChatScreen() {
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Claude</Text>
-          {safeMode && <View style={styles.safeBadge}><Text style={styles.safeBadgeText}>safe mode</Text></View>}
+          <View style={styles.headerRight}>
+            {nodeStatus !== null && (
+              <Text style={[styles.nodeBadge, { color: nodeStatus.online ? '#44cc88' : '#cc4444' }]}>
+                {nodeStatus.online
+                  ? `● node · ${nodeStatus.latency}ms`
+                  : '● offline · cloud only'}
+              </Text>
+            )}
+            {safeMode && <View style={styles.safeBadge}><Text style={styles.safeBadgeText}>safe mode</Text></View>}
+          </View>
         </View>
 
         {/* Messages */}
@@ -471,6 +483,8 @@ const styles = StyleSheet.create({
 
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#1a1a2a' },
   headerTitle: { fontFamily: FONT, fontSize: 16, fontWeight: '600', color: '#c0c0d0', letterSpacing: 1 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  nodeBadge: { fontFamily: FONT, fontSize: 9, letterSpacing: 0.5 },
   safeBadge: { borderWidth: 1, borderColor: '#ff9500', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 3 },
   safeBadgeText: { fontFamily: FONT, fontSize: 9, color: '#ff9500', letterSpacing: 0.5 },
 
