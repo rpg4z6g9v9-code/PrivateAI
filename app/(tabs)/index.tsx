@@ -258,9 +258,18 @@ export default function ChatScreen() {
     try {
       setIsLoading(true);
 
-      // Fresh node check before every send — badge and routing must reflect current state
-      setNodeStatus(null); // show "checking" while in-flight
-      const freshStatus = await checkPrivateNode();
+      // Fresh node check before every send.
+      // Routing uses freshStatus directly — never React state, which is async and stale.
+      setNodeStatus(null); // clear badge during check
+      let freshStatus: PrivateNodeStatus;
+      try {
+        freshStatus = await checkPrivateNode();
+      } catch {
+        freshStatus = { online: false, host: '', latency: null, models: [] };
+      }
+      if (!freshStatus.online) {
+        console.log('[PrivateNode] online=false source=fresh-check');
+      }
       setNodeStatus(freshStatus);
 
       const userMsg: Message = {
