@@ -1,20 +1,22 @@
 /**
  * conversationDB.ts — SQLite-backed conversation persistence
  *
- * v1 scope: single default conversation, append-only message log.
- * Schema is intentionally extensible: search, export, embeddings,
- * multi-conversation support can be added without a migration.
+ * Schema supports multiple conversations. All read/write functions
+ * accept a conversationId — callers track which one is active.
  *
  * Usage:
- *   await initConversationDB()    — call once on app mount
- *   await persistMessage(msg)     — call after each message
- *   await loadConversation()      — call on mount to restore history
+ *   await initConversationDB()                  — call once on app mount
+ *   const id = await getLatestConversationId()  — restore most recent session
+ *   await persistMessage(msg, conversationId)   — append message
+ *   await loadConversation(conversationId)       — restore messages
+ *   const id = await createConversation()        — start new session
+ *   await clearConversation(conversationId)      — wipe messages (keeps row)
  */
 
 import * as SQLite from 'expo-sqlite';
 
 const DB_NAME = 'privateai_v1.db';
-const DEFAULT_CONVO_ID = 'default';
+export const DEFAULT_CONVO_ID = 'default';
 
 let db: SQLite.SQLiteDatabase | null = null;
 
@@ -63,17 +65,46 @@ export async function initConversationDB(): Promise<void> {
   );
 }
 
+// ── Create ────────────────────────────────────────────────────
+
+export async function createConversation(): Promise<string> {
+  if (!db) throw new Error('[DB] createConversation called before initConversationDB');
+  const id = `conv_${Date.now()}`;
+  await db.runAsync(
+    'INSERT INTO conversations (id, created_at) VALUES (?, ?)',
+    [id, Date.now()]
+  );
+  return id;
+}
+
+// ── Restore ───────────────────────────────────────────────────
+
+/**
+ * Returns the conversation_id that has the most recent message.
+ * Falls back to DEFAULT_CONVO_ID if no messages exist yet.
+ */
+export async function getLatestConversationId(): Promise<string> {
+  if (!db) return DEFAULT_CONVO_ID;
+  const row = await db.getFirstAsync<{ conversation_id: string }>(
+    'SELECT conversation_id FROM messages ORDER BY timestamp DESC LIMIT 1'
+  );
+  return row?.conversation_id ?? DEFAULT_CONVO_ID;
+}
+
 // ── Write ─────────────────────────────────────────────────────
 
-export async function persistMessage(msg: {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  routedVia?: string | null;
-  latency?: number | null;
-  model?: string | null;
-  timestamp?: number;
-}): Promise<void> {
+export async function persistMessage(
+  msg: {
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    routedVia?: string | null;
+    latency?: number | null;
+    model?: string | null;
+    timestamp?: number;
+  },
+  conversationId: string
+): Promise<void> {
   if (!db) {
     console.warn('[DB] persistMessage called before initConversationDB');
     return;
@@ -84,7 +115,7 @@ export async function persistMessage(msg: {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       msg.id,
-      DEFAULT_CONVO_ID,
+      conversationId,
       msg.role,
       msg.content,
       msg.timestamp ?? Date.now(),
@@ -97,17 +128,17 @@ export async function persistMessage(msg: {
 
 // ── Clear ─────────────────────────────────────────────────────
 
-export async function clearConversation(): Promise<void> {
+export async function clearConversation(conversationId: string): Promise<void> {
   if (!db) return;
   await db.runAsync(
     'DELETE FROM messages WHERE conversation_id = ?',
-    [DEFAULT_CONVO_ID]
+    [conversationId]
   );
 }
 
 // ── Read ──────────────────────────────────────────────────────
 
-export async function loadConversation(): Promise<PersistedMessage[]> {
+export async function loadConversation(conversationId: string): Promise<PersistedMessage[]> {
   if (!db) return [];
   return db.getAllAsync<PersistedMessage>(
     `SELECT id, role, content, timestamp,
@@ -115,6 +146,6 @@ export async function loadConversation(): Promise<PersistedMessage[]> {
      FROM messages
      WHERE conversation_id = ?
      ORDER BY timestamp ASC`,
-    [DEFAULT_CONVO_ID]
+    [conversationId]
   );
 }

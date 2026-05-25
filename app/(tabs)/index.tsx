@@ -26,7 +26,10 @@ import { checkInjection, sanitizeOutput, classifyData, logSecurityEvent } from '
 import { canAccessVault, unlockVault, lockVault } from '@/services/dataVault';
 import { routeAI } from '@/services/aiRouter';
 import { checkPrivateNode, type PrivateNodeStatus } from '@/services/localAI';
-import { initConversationDB, persistMessage, loadConversation, clearConversation } from '@/services/conversationDB';
+import {
+  initConversationDB, persistMessage, loadConversation, clearConversation,
+  createConversation, getLatestConversationId, DEFAULT_CONVO_ID,
+} from '@/services/conversationDB';
 import type { ConversationMessage } from '@/services/claude';
 import { AppState, type AppStateStatus } from 'react-native';
 import Constants from 'expo-constants';
@@ -64,6 +67,7 @@ export default function ChatScreen() {
   // Core chat state
   const [messages, setMessages] = useState<Message[]>([]);
   const [isRestoring, setIsRestoring] = useState(true);
+  const [activeConversationId, setActiveConversationId] = useState(DEFAULT_CONVO_ID);
   const [inputText, setInputText] = useState('');
   const [attachment, setAttachment] = useState<AttachmentImage | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -144,7 +148,9 @@ export default function ChatScreen() {
     (async () => {
       try {
         await initConversationDB();
-        const rows = await loadConversation();
+        const convoId = await getLatestConversationId();
+        setActiveConversationId(convoId);
+        const rows = await loadConversation(convoId);
         if (rows.length > 0) {
           setMessages(rows.map(r => ({
             id: r.id,
@@ -300,7 +306,7 @@ export default function ChatScreen() {
       const newMessages = [...messages, userMsg];
       setMessages(newMessages);
       setAttachment(null);
-      persistMessage(userMsg).catch(e => console.warn('[DB] persist user msg failed:', e));
+      persistMessage(userMsg, activeConversationId).catch(e => console.warn('[DB] persist user msg failed:', e));
 
       // Route to AI (cloud or local, respecting security constraints)
       const result = await routeAI({
@@ -335,7 +341,7 @@ export default function ChatScreen() {
 
       const finalMessages = [...newMessages, assistantMsg];
       setMessages(finalMessages);
-      persistMessage(assistantMsg).catch(e => console.warn('[DB] persist assistant msg failed:', e));
+      persistMessage(assistantMsg, activeConversationId).catch(e => console.warn('[DB] persist assistant msg failed:', e));
 
       // Speak response
       if (reply) {
@@ -366,14 +372,18 @@ export default function ChatScreen() {
 
   // ── New Chat ───────────────────────────────────────────────────
   const handleNewChat = () => {
-    Alert.alert('New Chat', 'Clear current conversation?', [
+    Alert.alert('New Chat', 'Start a new conversation? Current session is preserved.', [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Clear',
-        style: 'destructive',
+        text: 'New Chat',
         onPress: async () => {
-          setMessages([]);
-          clearConversation().catch(e => console.warn('[DB] clear failed:', e));
+          try {
+            const newId = await createConversation();
+            setActiveConversationId(newId);
+            setMessages([]);
+          } catch (e) {
+            console.warn('[DB] createConversation failed:', e);
+          }
         },
       },
     ]);
