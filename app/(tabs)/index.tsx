@@ -466,6 +466,31 @@ export default function ChatScreen() {
     }
   };
 
+  // ── Conversation grouping helper ──────────────────────────────
+  const groupConversations = (list: ConversationSummary[]) => {
+    const now = Date.now();
+    const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+    const startOfYesterday = new Date(startOfToday); startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+    const startOf7Days = new Date(startOfToday); startOf7Days.setDate(startOf7Days.getDate() - 7);
+
+    const groups: { label: string; items: ConversationSummary[] }[] = [
+      { label: 'Today', items: [] },
+      { label: 'Yesterday', items: [] },
+      { label: 'Last 7 days', items: [] },
+      { label: 'Older', items: [] },
+    ];
+
+    for (const conv of list) {
+      const ts = conv.lastActive ?? conv.createdAt;
+      if (ts >= startOfToday.getTime())       groups[0].items.push(conv);
+      else if (ts >= startOfYesterday.getTime()) groups[1].items.push(conv);
+      else if (ts >= startOf7Days.getTime())  groups[2].items.push(conv);
+      else                                     groups[3].items.push(conv);
+    }
+
+    return groups.filter(g => g.items.length > 0);
+  };
+
   // ── Render ─────────────────────────────────────────────────────
   if (authLocked) {
     return (
@@ -619,24 +644,37 @@ export default function ChatScreen() {
             </View>
             <ScrollView style={styles.historyList}>
               {historyList.length === 0 ? (
-                <Text style={styles.historyEmpty}>No previous conversations</Text>
-              ) : historyList.map(conv => {
-                const isActive = conv.id === activeConversationId;
-                const label = conv.title
-                  ?? (conv.snippet ? conv.snippet.slice(0, 60) + (conv.snippet.length > 60 ? '…' : '') : '(empty)');
-                const when = conv.lastActive
-                  ? new Date(conv.lastActive).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                  : '';
-                return (
-                  <TouchableOpacity
-                    key={conv.id}
-                    style={[styles.historyItem, isActive && styles.historyItemActive]}
-                    onPress={() => switchToConversation(conv.id)}>
-                    <Text style={styles.historySnippet} numberOfLines={2}>{label}</Text>
-                    <Text style={styles.historyWhen}>{when}</Text>
-                  </TouchableOpacity>
-                );
-              })}
+                <Text style={styles.historyEmpty}>
+                  {historyQuery ? 'No matches' : 'No previous conversations'}
+                </Text>
+              ) : (() => {
+                const renderItem = (conv: ConversationSummary) => {
+                  const isActive = conv.id === activeConversationId;
+                  const label = conv.title
+                    ?? (conv.snippet ? conv.snippet.slice(0, 60) + (conv.snippet.length > 60 ? '…' : '') : '(empty)');
+                  return (
+                    <TouchableOpacity
+                      key={conv.id}
+                      style={[styles.historyItem, isActive && styles.historyItemActive]}
+                      onPress={() => switchToConversation(conv.id)}>
+                      <Text style={styles.historySnippet} numberOfLines={2}>{label}</Text>
+                    </TouchableOpacity>
+                  );
+                };
+
+                if (historyQuery) {
+                  // Search results: flat list, no grouping
+                  return historyList.map(renderItem);
+                }
+
+                // Browsing: grouped by recency
+                return groupConversations(historyList).map(group => (
+                  <View key={group.label}>
+                    <Text style={styles.historyGroupLabel}>{group.label}</Text>
+                    {group.items.map(renderItem)}
+                  </View>
+                ));
+              })()}
             </ScrollView>
           </View>
         </View>
@@ -700,8 +738,8 @@ const styles = StyleSheet.create({
   historySearch: { fontFamily: FONT, fontSize: 13, color: '#c0c0d0', backgroundColor: '#141a26', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
   historyList: { paddingHorizontal: 16, paddingTop: 8 },
   historyEmpty: { fontFamily: FONT, fontSize: 12, color: '#555', textAlign: 'center', paddingVertical: 32 },
-  historyItem: { paddingVertical: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: '#1a1a2a', gap: 4 },
+  historyGroupLabel: { fontFamily: FONT, fontSize: 10, color: '#556677', letterSpacing: 0.8, textTransform: 'uppercase', paddingTop: 14, paddingBottom: 4, paddingHorizontal: 2 },
+  historyItem: { paddingVertical: 12, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: '#1a1a2a' },
   historyItemActive: { backgroundColor: 'rgba(74, 158, 255, 0.08)', borderRadius: 8 },
   historySnippet: { fontFamily: FONT, fontSize: 13, color: '#c0c0d0', lineHeight: 18 },
-  historyWhen: { fontFamily: FONT, fontSize: 10, color: '#556', letterSpacing: 0.3 },
 });
