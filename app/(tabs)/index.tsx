@@ -443,7 +443,6 @@ export default function ChatScreen() {
 
   // ── Rename ────────────────────────────────────────────────────
   const startRename = (conv: ConversationSummary) => {
-    console.log('[Rename] target id:', conv.id, 'current title:', conv.title);
     setRenameTarget(conv);
     setRenameText(conv.title ?? conv.snippet?.slice(0, 40) ?? '');
     // Close history modal first — nested modals fight touch responders on iOS
@@ -453,17 +452,13 @@ export default function ChatScreen() {
 
   const confirmRename = async () => {
     const title = renameText.trim();
-    console.log('[Rename] new title:', JSON.stringify(title), '| target:', renameTarget?.id);
     if (!renameTarget || !title) {
-      console.log('[Rename] aborted — no target or empty title');
       setShowRename(false);
       return;
     }
     try {
       await updateConversationTitle(renameTarget.id, title);
-      console.log('[Rename] update complete');
       const list = await searchConversations(historyQuery);
-      console.log('[Rename] refreshed list titles:', list.map(c => `${c.id.slice(-6)}="${c.title}"`).join(', '));
       setHistoryList(list);
     } catch (e) {
       console.warn('[Rename] failed:', e);
@@ -736,20 +731,10 @@ export default function ChatScreen() {
               returnKeyType="done"
             />
             <View style={styles.renameActions}>
-              <Pressable
-                onPress={() => {
-                  console.log('[Rename] cancel pressed');
-                  setShowRename(false);
-                }}
-                style={styles.renameCancelBtn}>
+              <Pressable onPress={() => setShowRename(false)} style={styles.renameCancelBtn}>
                 <Text style={styles.renameCancelText}>Cancel</Text>
               </Pressable>
-              <Pressable
-                onPress={() => {
-                  console.log('[Rename] save pressed');
-                  confirmRename();
-                }}
-                style={styles.renameConfirmBtn}>
+              <Pressable onPress={confirmRename} style={styles.renameConfirmBtn}>
                 <Text style={styles.renameConfirmText}>Save</Text>
               </Pressable>
             </View>
