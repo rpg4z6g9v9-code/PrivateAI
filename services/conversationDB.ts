@@ -77,6 +77,13 @@ export async function initConversationDB(): Promise<void> {
       ON messages(conversation_id, timestamp);
   `);
 
+  // Migration: add archived column if not present (idempotent — silently fails on re-run)
+  try {
+    await db.execAsync('ALTER TABLE conversations ADD COLUMN archived INTEGER DEFAULT 0');
+  } catch {
+    // Column already exists — expected on all runs after the first
+  }
+
   // Ensure the default conversation row exists
   await db.runAsync(
     'INSERT OR IGNORE INTO conversations (id, created_at) VALUES (?, ?)',
@@ -163,6 +170,7 @@ export type ConversationSummary = {
   lastActive: number | null;
   title: string | null;    // explicitly set title (first user message, editable later)
   snippet: string | null;  // first message content, fallback display
+  archived: number;        // 0 = active, 1 = archived (soft-deleted, recoverable)
 };
 
 /**
@@ -176,10 +184,12 @@ export async function getConversations(): Promise<ConversationSummary[]> {
        c.id,
        c.created_at                                                                                    AS createdAt,
        c.title,
+       COALESCE(c.archived, 0)                                                                         AS archived,
        (SELECT timestamp FROM messages WHERE conversation_id = c.id ORDER BY timestamp DESC LIMIT 1)   AS lastActive,
        (SELECT content   FROM messages WHERE conversation_id = c.id ORDER BY timestamp ASC  LIMIT 1)   AS snippet
      FROM conversations c
-     WHERE EXISTS (SELECT 1 FROM messages WHERE conversation_id = c.id)
+     WHERE COALESCE(c.archived, 0) = 0
+       AND EXISTS (SELECT 1 FROM messages WHERE conversation_id = c.id)
      ORDER BY lastActive DESC
      LIMIT 20`
   );
@@ -190,6 +200,26 @@ export async function updateConversationTitle(conversationId: string, title: str
   await db.runAsync(
     'UPDATE conversations SET title = ? WHERE id = ?',
     [title, conversationId]
+  );
+}
+
+// ── Archive (soft-delete) ──────────────────────────────────────
+// Archived conversations are hidden from normal history but never destroyed.
+// Aligns with ACTIVE → FROZEN → ARCHIVE lifecycle in storage policy.
+
+export async function archiveConversation(conversationId: string): Promise<void> {
+  if (!db) return;
+  await db.runAsync(
+    'UPDATE conversations SET archived = 1 WHERE id = ?',
+    [conversationId]
+  );
+}
+
+export async function unarchiveConversation(conversationId: string): Promise<void> {
+  if (!db) return;
+  await db.runAsync(
+    'UPDATE conversations SET archived = 0 WHERE id = ?',
+    [conversationId]
   );
 }
 
