@@ -195,6 +195,34 @@ export async function getConversations(): Promise<ConversationSummary[]> {
   );
 }
 
+/**
+ * Full-text search across conversation titles and message content.
+ * Uses SQL LIKE — no FTS, no embeddings, no indexing overhead.
+ * Fast enough for the session volumes this app will realistically hold.
+ */
+export async function searchConversations(query: string): Promise<ConversationSummary[]> {
+  if (!db || !query.trim()) return getConversations();
+  const term = `%${query.trim()}%`;
+  return db.getAllAsync<ConversationSummary>(
+    `SELECT
+       c.id,
+       c.created_at                                                                                    AS createdAt,
+       c.title,
+       COALESCE(c.archived, 0)                                                                         AS archived,
+       (SELECT timestamp FROM messages WHERE conversation_id = c.id ORDER BY timestamp DESC LIMIT 1)   AS lastActive,
+       (SELECT content   FROM messages WHERE conversation_id = c.id ORDER BY timestamp ASC  LIMIT 1)   AS snippet
+     FROM conversations c
+     WHERE COALESCE(c.archived, 0) = 0
+       AND (
+         c.title LIKE ?
+         OR EXISTS (SELECT 1 FROM messages WHERE conversation_id = c.id AND content LIKE ?)
+       )
+     ORDER BY lastActive DESC
+     LIMIT 20`,
+    [term, term]
+  );
+}
+
 export async function updateConversationTitle(conversationId: string, title: string): Promise<void> {
   if (!db) return;
   await db.runAsync(

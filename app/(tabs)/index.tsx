@@ -28,8 +28,8 @@ import { routeAI } from '@/services/aiRouter';
 import { checkPrivateNode, type PrivateNodeStatus } from '@/services/localAI';
 import {
   initConversationDB, persistMessage, loadConversation, clearConversation,
-  createConversation, getLatestConversationId, getConversations, updateConversationTitle,
-  DEFAULT_CONVO_ID, type ConversationSummary,
+  createConversation, getLatestConversationId, getConversations, searchConversations,
+  updateConversationTitle, DEFAULT_CONVO_ID, type ConversationSummary,
 } from '@/services/conversationDB';
 import type { ConversationMessage } from '@/services/claude';
 import { AppState, type AppStateStatus } from 'react-native';
@@ -95,6 +95,7 @@ export default function ChatScreen() {
   // History modal
   const [showHistory, setShowHistory] = useState(false);
   const [historyList, setHistoryList] = useState<ConversationSummary[]>([]);
+  const [historyQuery, setHistoryQuery] = useState('');
 
   // UI state
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -403,11 +404,22 @@ export default function ChatScreen() {
   // ── History Modal ──────────────────────────────────────────────
   const openHistory = async () => {
     try {
+      setHistoryQuery('');
       const list = await getConversations();
       setHistoryList(list);
       setShowHistory(true);
     } catch (e) {
       console.warn('[DB] getConversations failed:', e);
+    }
+  };
+
+  const handleHistorySearch = async (q: string) => {
+    setHistoryQuery(q);
+    try {
+      const list = await searchConversations(q);
+      setHistoryList(list);
+    } catch (e) {
+      console.warn('[DB] searchConversations failed:', e);
     }
   };
 
@@ -594,6 +606,17 @@ export default function ChatScreen() {
                 <Text style={styles.historyClose}>✕</Text>
               </TouchableOpacity>
             </View>
+            <View style={styles.historySearchRow}>
+              <TextInput
+                style={styles.historySearch}
+                placeholder="Search conversations..."
+                placeholderTextColor="#444"
+                value={historyQuery}
+                onChangeText={handleHistorySearch}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
             <ScrollView style={styles.historyList}>
               {historyList.length === 0 ? (
                 <Text style={styles.historyEmpty}>No previous conversations</Text>
@@ -673,6 +696,8 @@ const styles = StyleSheet.create({
   historyHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#1a1a2a' },
   historyTitle: { fontFamily: FONT, fontSize: 14, fontWeight: '600', color: '#c0c0d0', letterSpacing: 1 },
   historyClose: { fontFamily: FONT, fontSize: 16, color: '#888', paddingHorizontal: 4 },
+  historySearchRow: { paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#1a1a2a' },
+  historySearch: { fontFamily: FONT, fontSize: 13, color: '#c0c0d0', backgroundColor: '#141a26', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
   historyList: { paddingHorizontal: 16, paddingTop: 8 },
   historyEmpty: { fontFamily: FONT, fontSize: 12, color: '#555', textAlign: 'center', paddingVertical: 32 },
   historyItem: { paddingVertical: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: '#1a1a2a', gap: 4 },
