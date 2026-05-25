@@ -26,7 +26,7 @@ import { checkInjection, sanitizeOutput, classifyData, logSecurityEvent } from '
 import { canAccessVault, unlockVault, lockVault } from '@/services/dataVault';
 import { routeAI } from '@/services/aiRouter';
 import { checkPrivateNode, type PrivateNodeStatus } from '@/services/localAI';
-import { initConversationDB, persistMessage, loadConversation } from '@/services/conversationDB';
+import { initConversationDB, persistMessage, loadConversation, clearConversation } from '@/services/conversationDB';
 import type { ConversationMessage } from '@/services/claude';
 import { AppState, type AppStateStatus } from 'react-native';
 import Constants from 'expo-constants';
@@ -364,6 +364,21 @@ export default function ChatScreen() {
     sendMessageWithText(text);
   };
 
+  // ── New Chat ───────────────────────────────────────────────────
+  const handleNewChat = () => {
+    Alert.alert('New Chat', 'Clear current conversation?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Clear',
+        style: 'destructive',
+        onPress: async () => {
+          setMessages([]);
+          clearConversation().catch(e => console.warn('[DB] clear failed:', e));
+        },
+      },
+    ]);
+  };
+
   // ── Handle Image Attachment ────────────────────────────────────
   const pickImage = async () => {
     try {
@@ -414,6 +429,9 @@ export default function ChatScreen() {
 
         {/* Header */}
         <View style={styles.header}>
+          <TouchableOpacity onPress={handleNewChat} style={styles.newChatBtn}>
+            <Text style={styles.newChatText}>+ new</Text>
+          </TouchableOpacity>
           <Text style={styles.headerTitle}>Claude</Text>
           <View style={styles.headerRight}>
             {isCheckingNode ? (
@@ -520,6 +538,8 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#1a1a2a' },
   headerTitle: { fontFamily: FONT, fontSize: 16, fontWeight: '600', color: '#c0c0d0', letterSpacing: 1 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  newChatBtn: { paddingHorizontal: 8, paddingVertical: 4 },
+  newChatText: { fontFamily: FONT, fontSize: 11, color: '#4a9eff', letterSpacing: 0.5 },
   nodeBadge: { fontFamily: FONT, fontSize: 9, letterSpacing: 0.5 },
   safeBadge: { borderWidth: 1, borderColor: '#ff9500', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 3 },
   safeBadgeText: { fontFamily: FONT, fontSize: 9, color: '#ff9500', letterSpacing: 0.5 },

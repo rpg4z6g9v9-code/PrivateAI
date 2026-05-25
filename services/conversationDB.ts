@@ -95,6 +95,16 @@ export async function persistMessage(msg: {
   );
 }
 
+// ── Clear ─────────────────────────────────────────────────────
+
+export async function clearConversation(): Promise<void> {
+  if (!db) return;
+  await db.runAsync(
+    'DELETE FROM messages WHERE conversation_id = ?',
+    [DEFAULT_CONVO_ID]
+  );
+}
+
 // ── Read ──────────────────────────────────────────────────────
 
 export async function loadConversation(): Promise<PersistedMessage[]> {
