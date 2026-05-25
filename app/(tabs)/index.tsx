@@ -20,7 +20,6 @@ import * as Speech from 'expo-speech';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import Swipeable from 'react-native-gesture-handler/Swipeable';
 import CognitiveBackground from '@/components/chat/CognitiveBackground';
 import { networkMonitor } from '@/services/networkMonitor';
 import { checkInjection, sanitizeOutput, classifyData, logSecurityEvent } from '@/services/securityGateway';
@@ -30,7 +29,7 @@ import { checkPrivateNode, type PrivateNodeStatus } from '@/services/localAI';
 import {
   initConversationDB, persistMessage, loadConversation, clearConversation,
   createConversation, getLatestConversationId, getConversations, searchConversations,
-  updateConversationTitle, archiveConversation, DEFAULT_CONVO_ID, type ConversationSummary,
+  updateConversationTitle, DEFAULT_CONVO_ID, type ConversationSummary,
 } from '@/services/conversationDB';
 import type { ConversationMessage } from '@/services/claude';
 import { AppState, type AppStateStatus } from 'react-native';
@@ -447,17 +446,6 @@ export default function ChatScreen() {
     }
   };
 
-  // ── Archive ───────────────────────────────────────────────────
-  const handleArchive = async (id: string) => {
-    try {
-      await archiveConversation(id);
-      const list = await searchConversations(historyQuery);
-      setHistoryList(list);
-    } catch (e) {
-      console.warn('[DB] archive failed:', e);
-    }
-  };
-
   // ── Rename ────────────────────────────────────────────────────
   const startRename = (conv: ConversationSummary) => {
     setRenameTarget(conv);
@@ -692,9 +680,9 @@ export default function ChatScreen() {
                   const isActive = conv.id === activeConversationId;
                   const label = conv.title
                     ?? (conv.snippet ? conv.snippet.slice(0, 60) + (conv.snippet.length > 60 ? '…' : '') : '(empty)');
-
-                  const row = (
+                  return (
                     <TouchableOpacity
+                      key={conv.id}
                       style={[styles.historyItem, isActive && styles.historyItemActive]}
                       onPress={() => switchToConversation(conv.id)}
                       onLongPress={() => startRename(conv)}
@@ -702,24 +690,6 @@ export default function ChatScreen() {
                       <Text style={styles.historySnippet} numberOfLines={2}>{label}</Text>
                       {isActive && <Text style={styles.historyActiveIndicator}>current</Text>}
                     </TouchableOpacity>
-                  );
-
-                  // Active conversation cannot be archived — no swipe action
-                  if (isActive) return <View key={conv.id}>{row}</View>;
-
-                  return (
-                    <Swipeable
-                      key={conv.id}
-                      friction={2}
-                      renderRightActions={() => (
-                        <TouchableOpacity
-                          style={styles.archiveAction}
-                          onPress={() => handleArchive(conv.id)}>
-                          <Text style={styles.archiveActionText}>archive</Text>
-                        </TouchableOpacity>
-                      )}>
-                      {row}
-                    </Swipeable>
                   );
                 };
 
@@ -836,8 +806,6 @@ const styles = StyleSheet.create({
   historyItemActive: { backgroundColor: 'rgba(74, 158, 255, 0.08)', borderRadius: 8 },
   historySnippet: { fontFamily: FONT, fontSize: 13, color: '#c0c0d0', lineHeight: 18 },
   historyActiveIndicator: { fontFamily: FONT, fontSize: 9, color: '#4a9eff', marginTop: 3, letterSpacing: 0.3 },
-  archiveAction: { justifyContent: 'center', alignItems: 'center', width: 80, backgroundColor: '#1a1a2a' },
-  archiveActionText: { fontFamily: FONT, fontSize: 11, color: '#556677', letterSpacing: 0.5 },
 
   renameOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', paddingHorizontal: 32 },
   renameSheet: { backgroundColor: '#0e1420', borderRadius: 14, padding: 20, gap: 16, borderWidth: 1, borderColor: '#1a2030' },
