@@ -21,12 +21,12 @@ import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import CognitiveBackground from '@/components/chat/CognitiveBackground';
-import secureStorage from '@/services/secureStorage';
 import { networkMonitor } from '@/services/networkMonitor';
 import { checkInjection, sanitizeOutput, classifyData, logSecurityEvent } from '@/services/securityGateway';
 import { canAccessVault, unlockVault, lockVault } from '@/services/dataVault';
 import { routeAI } from '@/services/aiRouter';
 import { checkPrivateNode, type PrivateNodeStatus } from '@/services/localAI';
+import { initConversationDB, persistMessage, loadConversation } from '@/services/conversationDB';
 import type { ConversationMessage } from '@/services/claude';
 import { AppState, type AppStateStatus } from 'react-native';
 import Constants from 'expo-constants';
@@ -52,7 +52,8 @@ interface AttachmentImage {
 // ── Constants ──────────────────────────────────────────────────
 const FONT = 'Courier New';
 const CLAUDE_API_KEY = process.env.EXPO_PUBLIC_CLAUDE_API_KEY ?? '';
-const HISTORY_KEY = 'chat_history_v1';
+// HISTORY_KEY kept for reference; messages now persisted in SQLite via conversationDB.ts
+// const HISTORY_KEY = 'chat_history_v1';
 const AUTH_LOCKED_KEY = 'auth_locked_v1';
 const SETTINGS_KEY = 'voice_settings_v1';
 const BACKGROUND_LOCK_MS = 5 * 60 * 1000; // 5 minutes
@@ -137,14 +138,24 @@ export default function ChatScreen() {
     return () => sub.remove();
   }, [authenticate]);
 
-  // ── Load chat history on mount ────────────────────────────────
+  // ── Init DB and restore conversation on mount ─────────────────
   useEffect(() => {
     (async () => {
       try {
-        const saved = await secureStorage.getItem(HISTORY_KEY);
-        if (saved) setMessages(JSON.parse(saved));
+        await initConversationDB();
+        const rows = await loadConversation();
+        if (rows.length > 0) {
+          setMessages(rows.map(r => ({
+            id: r.id,
+            role: r.role,
+            content: r.content,
+            routedVia: (r.routedVia as Message['routedVia']) ?? undefined,
+            latency: r.latency ?? undefined,
+            model: r.model ?? undefined,
+          })));
+        }
       } catch (e) {
-        console.warn('[Chat] Load history failed:', e);
+        console.warn('[DB] Load conversation failed:', e);
       }
     })();
   }, []);
@@ -286,6 +297,7 @@ export default function ChatScreen() {
       const newMessages = [...messages, userMsg];
       setMessages(newMessages);
       setAttachment(null);
+      persistMessage(userMsg).catch(e => console.warn('[DB] persist user msg failed:', e));
 
       // Route to AI (cloud or local, respecting security constraints)
       const result = await routeAI({
@@ -320,9 +332,7 @@ export default function ChatScreen() {
 
       const finalMessages = [...newMessages, assistantMsg];
       setMessages(finalMessages);
-
-      // Persist to encrypted storage
-      await secureStorage.setItem(HISTORY_KEY, JSON.stringify(finalMessages));
+      persistMessage(assistantMsg).catch(e => console.warn('[DB] persist assistant msg failed:', e));
 
       // Speak response
       if (reply) {
