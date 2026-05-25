@@ -5,12 +5,28 @@
  * accept a conversationId — callers track which one is active.
  *
  * Usage:
- *   await initConversationDB()                  — call once on app mount
- *   const id = await getLatestConversationId()  — restore most recent session
- *   await persistMessage(msg, conversationId)   — append message
- *   await loadConversation(conversationId)       — restore messages
- *   const id = await createConversation()        — start new session
- *   await clearConversation(conversationId)      — wipe messages (keeps row)
+ *   await initConversationDB()                         — call once on app mount
+ *   const id = await getLatestConversationId()         — restore most recent session
+ *   await persistMessage(msg, conversationId)          — append message
+ *   await loadConversation(conversationId)             — restore messages
+ *   const id = await createConversation()              — start new session
+ *   await clearConversation(conversationId)            — wipe messages (keeps row)
+ *   await updateConversationTitle(conversationId, t)   — set/update display title
+ *   await getConversations()                           — list for history UI
+ *
+ * ---
+ * Conversation state model (not yet implemented, document before codebase grows):
+ *
+ *   ACTIVE conversation  — the one currently receiving new messages.
+ *                          One at a time. Tracked in component state (activeConversationId).
+ *                          Writes go here. UI is rendering this.
+ *
+ *   LOADED conversation  — one whose messages have been fetched into memory.
+ *                          Currently always the same as ACTIVE.
+ *                          Will diverge when: preloading, caching adjacent sessions,
+ *                          search previews, background summarization, or side-by-side views.
+ *
+ * Invariant today: ACTIVE === LOADED. Break this only intentionally.
  */
 
 import * as SQLite from 'expo-sqlite';
