@@ -83,6 +83,7 @@ export default function ChatScreen() {
 
   // Node status
   const [nodeStatus, setNodeStatus] = useState<PrivateNodeStatus | null>(null);
+  const [isCheckingNode, setIsCheckingNode] = useState(false);
 
   // UI state
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -260,12 +261,15 @@ export default function ChatScreen() {
 
       // Fresh node check before every send.
       // Routing uses freshStatus directly — never React state, which is async and stale.
-      setNodeStatus(null); // clear badge during check
+      setNodeStatus(null);
+      setIsCheckingNode(true);
       let freshStatus: PrivateNodeStatus;
       try {
         freshStatus = await checkPrivateNode();
       } catch {
         freshStatus = { online: false, host: '', latency: null, models: [] };
+      } finally {
+        setIsCheckingNode(false);
       }
       if (!freshStatus.online) {
         console.log('[PrivateNode] online=false source=fresh-check');
@@ -399,7 +403,9 @@ export default function ChatScreen() {
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Claude</Text>
           <View style={styles.headerRight}>
-            {nodeStatus !== null && (
+            {isCheckingNode ? (
+              <Text style={[styles.nodeBadge, { color: '#888888' }]}>checking node...</Text>
+            ) : nodeStatus !== null && (
               <Text style={[styles.nodeBadge, { color: nodeStatus.online ? '#44cc88' : '#cc4444' }]}>
                 {nodeStatus.online
                   ? `● node · ${nodeStatus.latency}ms`
