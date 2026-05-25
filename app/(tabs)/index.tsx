@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Alert, Animated, Dimensions, KeyboardAvoidingView, Platform,
+  Alert, Animated, Dimensions, KeyboardAvoidingView, Modal, Platform,
   ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import * as LocalAuth from 'expo-local-authentication';
@@ -28,7 +28,8 @@ import { routeAI } from '@/services/aiRouter';
 import { checkPrivateNode, type PrivateNodeStatus } from '@/services/localAI';
 import {
   initConversationDB, persistMessage, loadConversation, clearConversation,
-  createConversation, getLatestConversationId, DEFAULT_CONVO_ID,
+  createConversation, getLatestConversationId, getConversations, DEFAULT_CONVO_ID,
+  type ConversationSummary,
 } from '@/services/conversationDB';
 import type { ConversationMessage } from '@/services/claude';
 import { AppState, type AppStateStatus } from 'react-native';
@@ -90,6 +91,10 @@ export default function ChatScreen() {
   // Node status
   const [nodeStatus, setNodeStatus] = useState<PrivateNodeStatus | null>(null);
   const [isCheckingNode, setIsCheckingNode] = useState(false);
+
+  // History modal
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyList, setHistoryList] = useState<ConversationSummary[]>([]);
 
   // UI state
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -389,6 +394,35 @@ export default function ChatScreen() {
     ]);
   };
 
+  // ── History Modal ──────────────────────────────────────────────
+  const openHistory = async () => {
+    try {
+      const list = await getConversations();
+      setHistoryList(list);
+      setShowHistory(true);
+    } catch (e) {
+      console.warn('[DB] getConversations failed:', e);
+    }
+  };
+
+  const switchToConversation = async (id: string) => {
+    try {
+      const rows = await loadConversation(id);
+      setActiveConversationId(id);
+      setMessages(rows.map(r => ({
+        id: r.id,
+        role: r.role,
+        content: r.content,
+        routedVia: (r.routedVia as Message['routedVia']) ?? undefined,
+        latency: r.latency ?? undefined,
+        model: r.model ?? undefined,
+      })));
+      setShowHistory(false);
+    } catch (e) {
+      console.warn('[DB] switchToConversation failed:', e);
+    }
+  };
+
   // ── Handle Image Attachment ────────────────────────────────────
   const pickImage = async () => {
     try {
@@ -454,6 +488,9 @@ export default function ChatScreen() {
               </Text>
             )}
             {safeMode && <View style={styles.safeBadge}><Text style={styles.safeBadgeText}>safe mode</Text></View>}
+            <TouchableOpacity onPress={openHistory} style={styles.historyBtn}>
+              <Text style={styles.historyBtnText}>≡</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -536,6 +573,46 @@ export default function ChatScreen() {
           </View>
         </View>
       </KeyboardAvoidingView>
+
+      {/* History Modal */}
+      <Modal
+        visible={showHistory}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowHistory(false)}>
+        <View style={styles.historyOverlay}>
+          <View style={styles.historySheet}>
+            <View style={styles.historyHeader}>
+              <Text style={styles.historyTitle}>Conversations</Text>
+              <TouchableOpacity onPress={() => setShowHistory(false)}>
+                <Text style={styles.historyClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.historyList}>
+              {historyList.length === 0 ? (
+                <Text style={styles.historyEmpty}>No previous conversations</Text>
+              ) : historyList.map(conv => {
+                const isActive = conv.id === activeConversationId;
+                const snippet = conv.snippet
+                  ? conv.snippet.slice(0, 60) + (conv.snippet.length > 60 ? '…' : '')
+                  : '(empty)';
+                const when = conv.lastActive
+                  ? new Date(conv.lastActive).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                  : '';
+                return (
+                  <TouchableOpacity
+                    key={conv.id}
+                    style={[styles.historyItem, isActive && styles.historyItemActive]}
+                    onPress={() => switchToConversation(conv.id)}>
+                    <Text style={styles.historySnippet} numberOfLines={2}>{snippet}</Text>
+                    <Text style={styles.historyWhen}>{when}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -582,4 +659,19 @@ const styles = StyleSheet.create({
   iconBtn: { padding: 8 },
   recordingActive: { backgroundColor: 'rgba(255, 68, 68, 0.1)', borderRadius: 20 },
   sendBtn: { padding: 8 },
+
+  historyBtn: { paddingHorizontal: 8, paddingVertical: 4 },
+  historyBtnText: { fontFamily: FONT, fontSize: 16, color: '#4a9eff' },
+
+  historyOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  historySheet: { backgroundColor: '#0e1420', borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '70%', paddingBottom: 32 },
+  historyHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#1a1a2a' },
+  historyTitle: { fontFamily: FONT, fontSize: 14, fontWeight: '600', color: '#c0c0d0', letterSpacing: 1 },
+  historyClose: { fontFamily: FONT, fontSize: 16, color: '#888', paddingHorizontal: 4 },
+  historyList: { paddingHorizontal: 16, paddingTop: 8 },
+  historyEmpty: { fontFamily: FONT, fontSize: 12, color: '#555', textAlign: 'center', paddingVertical: 32 },
+  historyItem: { paddingVertical: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: '#1a1a2a', gap: 4 },
+  historyItemActive: { backgroundColor: 'rgba(74, 158, 255, 0.08)', borderRadius: 8 },
+  historySnippet: { fontFamily: FONT, fontSize: 13, color: '#c0c0d0', lineHeight: 18 },
+  historyWhen: { fontFamily: FONT, fontSize: 10, color: '#556', letterSpacing: 0.3 },
 });

@@ -56,6 +56,9 @@ export async function initConversationDB(): Promise<void> {
       latency         INTEGER,
       model           TEXT
     );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_conv_ts
+      ON messages(conversation_id, timestamp);
   `);
 
   // Ensure the default conversation row exists
@@ -133,6 +136,34 @@ export async function clearConversation(conversationId: string): Promise<void> {
   await db.runAsync(
     'DELETE FROM messages WHERE conversation_id = ?',
     [conversationId]
+  );
+}
+
+// ── List ──────────────────────────────────────────────────────
+
+export type ConversationSummary = {
+  id: string;
+  createdAt: number;
+  lastActive: number | null;
+  snippet: string | null; // first message content, truncated
+};
+
+/**
+ * Returns up to 20 conversations that have at least one message,
+ * ordered by most recent activity.
+ */
+export async function getConversations(): Promise<ConversationSummary[]> {
+  if (!db) return [];
+  return db.getAllAsync<ConversationSummary>(
+    `SELECT
+       c.id,
+       c.created_at AS createdAt,
+       (SELECT timestamp FROM messages WHERE conversation_id = c.id ORDER BY timestamp DESC LIMIT 1) AS lastActive,
+       (SELECT content   FROM messages WHERE conversation_id = c.id ORDER BY timestamp ASC  LIMIT 1) AS snippet
+     FROM conversations c
+     WHERE EXISTS (SELECT 1 FROM messages WHERE conversation_id = c.id)
+     ORDER BY lastActive DESC
+     LIMIT 20`
   );
 }
 
