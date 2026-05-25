@@ -91,6 +91,8 @@ export default function ChatScreen() {
   // Node status
   const [nodeStatus, setNodeStatus] = useState<PrivateNodeStatus | null>(null);
   const [isCheckingNode, setIsCheckingNode] = useState(false);
+  const [routeLabel, setRouteLabel] = useState('');  // 'node' | 'cloud' | ''
+  const streamingMsgIdRef = useRef<string | null>(null);
 
   // History modal
   const [showHistory, setShowHistory] = useState(false);
@@ -270,6 +272,7 @@ export default function ChatScreen() {
   // ── Handle Message Send ────────────────────────────────────────
   const sendMessageWithText = async (text: string) => {
     if (!text.trim()) return;
+    if (isLoading) return; // prevent queuing while a response is in flight
 
     // Security check: detect injection
     const injectCheck = checkInjection(text);
@@ -290,6 +293,7 @@ export default function ChatScreen() {
 
     try {
       setIsLoading(true);
+      setRouteLabel('');
 
       // Fresh node check before every send.
       // Routing uses freshStatus directly — never React state, which is async and stale.
@@ -303,10 +307,8 @@ export default function ChatScreen() {
       } finally {
         setIsCheckingNode(false);
       }
-      if (!freshStatus.online) {
-        console.log('[PrivateNode] online=false source=fresh-check');
-      }
       setNodeStatus(freshStatus);
+      setRouteLabel(freshStatus.online ? 'node' : 'cloud');
 
       const userMsg: Message = {
         id: `${Date.now()}_user`,
@@ -320,6 +322,18 @@ export default function ChatScreen() {
       setAttachment(null);
       persistMessage(userMsg, activeConversationId).catch(e => console.warn('[DB] persist user msg failed:', e));
 
+      // Streaming placeholder — inserted immediately so the UI shows activity at once.
+      // For local route: tokens fill it in real time. For cloud: replaced on completion.
+      const streamingId = `${Date.now()}_assistant`;
+      streamingMsgIdRef.current = streamingId;
+      setMessages(prev => [...prev, { id: streamingId, role: 'assistant' as const, content: '' }]);
+
+      const onToken = (token: string) => {
+        setMessages(prev => prev.map(m =>
+          m.id === streamingId ? { ...m, content: m.content + token } : m
+        ));
+      };
+
       // Route to AI (cloud or local, respecting security constraints)
       const result = await routeAI({
         messages: newMessages.map(m => ({
@@ -329,8 +343,10 @@ export default function ChatScreen() {
         isSensitive,
         safeMode,
         nodeOnline: freshStatus.online,
+        onToken: freshStatus.online ? onToken : undefined,
       });
 
+      streamingMsgIdRef.current = null;
       const reply = sanitizeOutput(result.text);
 
       networkMonitor.logCall({
@@ -343,7 +359,7 @@ export default function ChatScreen() {
       });
 
       const assistantMsg: Message = {
-        id: `${Date.now()}_assistant`,
+        id: streamingId,
         role: 'assistant',
         content: reply,
         routedVia: result.route,
@@ -351,8 +367,8 @@ export default function ChatScreen() {
         latency: result.latency,
       };
 
-      const finalMessages = [...newMessages, assistantMsg];
-      setMessages(finalMessages);
+      // Replace streaming placeholder with final message (sanitized + route metadata)
+      setMessages(prev => prev.map(m => m.id === streamingId ? assistantMsg : m));
       persistMessage(assistantMsg, activeConversationId).catch(e => console.warn('[DB] persist assistant msg failed:', e));
 
       // Speak response
@@ -369,6 +385,7 @@ export default function ChatScreen() {
       Alert.alert('Error', 'Could not send message');
     } finally {
       setIsLoading(false);
+      setRouteLabel('');
     }
   };
 
@@ -597,10 +614,12 @@ export default function ChatScreen() {
             </View>
           ))}
 
-          {isLoading && (
+          {isLoading && streamingMsgIdRef.current === null && (
             <View style={[styles.msgRow, styles.msgAssistant]}>
               <View style={[styles.bubble, { backgroundColor: 'rgba(20, 20, 30, 0.6)', borderLeftWidth: 2, borderLeftColor: '#4a9eff' }]}>
-                <Text style={styles.msgText}>{loadingDots}</Text>
+                <Text style={[styles.msgText, { color: '#556677' }]}>
+                  {routeLabel ? `${routeLabel} ${loadingDots}` : loadingDots}
+                </Text>
               </View>
             </View>
           )}

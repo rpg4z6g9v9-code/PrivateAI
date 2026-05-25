@@ -24,10 +24,15 @@ You are trustworthy, honest, and direct. You respect the user's privacy and only
 
 Keep responses concise and clear.`;
 
+// Local (Ollama/phi4-mini) gets a tighter prompt — smaller model responds better to explicit brevity constraints.
+const LOCAL_SYSTEM_PROMPT = `You are a helpful AI assistant running on a private local device.
+Be direct and brief. Answer in 1-3 sentences unless the user asks for more detail.
+For simple questions give simple answers. Do not add unnecessary caveats or preamble.`;
+
 // ── Route Decision ───────────────────────────────────────────
 
 export async function routeAI(params: AIRouteParams): Promise<AIRouteResult> {
-  const { messages, isSensitive, safeMode, nodeOnline } = params;
+  const { messages, isSensitive, safeMode, nodeOnline, onToken } = params;
 
   // Rule 1: Sensitive data (medical/financial/PII) → always local if available
   if (isSensitive) {
@@ -36,7 +41,7 @@ export async function routeAI(params: AIRouteParams): Promise<AIRouteResult> {
         'Cannot send sensitive data to cloud. Private node is offline. Reconnect to your local network or remove sensitive content.'
       );
     }
-    const localResult = await tryLocalRoute(messages);
+    const localResult = await tryLocalRoute(messages, onToken);
     if (localResult) return localResult;
     throw new Error(
       'Cannot send sensitive data to cloud. Local AI not available. Enable on-device processing or remove sensitive content.'
@@ -50,7 +55,7 @@ export async function routeAI(params: AIRouteParams): Promise<AIRouteResult> {
         'Cloud features disabled due to security event. Private node is offline — cannot process request.'
       );
     }
-    const localResult = await tryLocalRoute(messages);
+    const localResult = await tryLocalRoute(messages, onToken);
     if (localResult) return localResult;
     throw new Error(
       'Cloud features disabled due to security event. Use local AI or reset the app.'
@@ -64,7 +69,7 @@ export async function routeAI(params: AIRouteParams): Promise<AIRouteResult> {
   }
 
   console.log('[Router] Routing: local');
-  const localResult = await tryLocalRoute(messages);
+  const localResult = await tryLocalRoute(messages, onToken);
   if (localResult) return localResult;
 
   console.log('[Router] Routing: cloud fallback');
@@ -122,19 +127,16 @@ async function cloudRoute(messages: ConversationMessage[]): Promise<AIRouteResul
 // ── Local Route (Llama 1B) ───────────────────────────────────
 
 async function tryLocalRoute(
-  messages: ConversationMessage[]
+  messages: ConversationMessage[],
+  onToken?: (token: string) => void,
 ): Promise<AIRouteResult | null> {
-  console.log('[Router] tryLocalRoute entered');
-  console.log('[Router] checking isModelLoaded');
   const isLoaded = await isModelLoaded();
-  console.log('[Router] isModelLoaded result:', isLoaded);
   if (!isLoaded) return null;
 
   try {
-    console.log('[Router] calling generateLocal');
     const start = Date.now();
     const lastMessage = messages[messages.length - 1]?.content ?? '';
-    const text = await generateLocal(lastMessage, SYSTEM_PROMPT);
+    const text = await generateLocal(lastMessage, LOCAL_SYSTEM_PROMPT, onToken);
     const latency = Date.now() - start;
 
     return {

@@ -308,6 +308,59 @@ export function buildLocalSystemPrompt(
   return parts.join('\n').trim();
 }
 
+// ─── Streaming helper ─────────────────────────────────────────
+//
+// React Native fetch does not support ReadableStream, but XHR does.
+// readyState 3 (LOADING) fires progressively as NDJSON lines arrive.
+
+function streamFromOllama(
+  host: string,
+  messages: { role: string; content: string }[],
+  onToken: (token: string) => void,
+  signal: AbortSignal,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    let fullText = '';
+    let processed = 0;
+
+    const flush = () => {
+      const newText = xhr.responseText.slice(processed);
+      processed = xhr.responseText.length;
+      for (const line of newText.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const obj = JSON.parse(trimmed);
+          const token: string = obj.message?.content ?? '';
+          if (token) { fullText += token; onToken(token); }
+        } catch {}
+      }
+    };
+
+    xhr.onreadystatechange = () => {
+      if (xhr.readyState === 3) flush();
+      if (xhr.readyState === 4) {
+        flush(); // drain any remainder
+        if (xhr.status >= 200 && xhr.status < 300) resolve(fullText.trim());
+        else reject(new Error(`Ollama error: ${xhr.status}`));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('[Ollama] Network error during streaming'));
+    signal.addEventListener('abort', () => { xhr.abort(); reject(new Error('Aborted')); });
+
+    xhr.open('POST', `http://${host}/api/chat`);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.send(JSON.stringify({
+      model: 'phi4-mini:latest',
+      messages,
+      stream: true,
+      temperature: 0.7,
+    }));
+  });
+}
+
 // ─── Inference ────────────────────────────────────────────────
 
 /**
@@ -331,25 +384,18 @@ export async function generateLocal(
   }
   messages.push({ role: 'user', content: userMessage.trim() });
 
-  let fullResponse = '';
-
-  console.log('[LocalAI] host:', OLLAMA_HOST);
-  console.log('[LocalAI] url:', `http://${OLLAMA_HOST}/api/chat`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 90_000);
 
   try {
-    const healthRes = await fetch(`http://${OLLAMA_HOST}/api/tags`).catch((err: unknown) => {
-      console.error('[LocalAI] health fetch failed:', String(err));
-      return null;
-    });
-    if (healthRes) {
-      console.log('[LocalAI] health status:', healthRes.status);
+    if (onToken) {
+      // Streaming path — XHR delivers NDJSON tokens progressively
+      const text = await streamFromOllama(OLLAMA_HOST, messages, onToken, controller.signal);
+      clearTimeout(timer);
+      return text;
     }
-    const controller = new AbortController();
 
-    // Timeout — 90s for model to respond (8B loads fast, but give headroom)
-    const timer = setTimeout(() => controller.abort(), 90_000);
-
-    // React Native fetch doesn't support ReadableStream — use stream: false
+    // Non-streaming path (used when no callback provided, e.g. cloud fallback context)
     const response = await fetch(`http://${OLLAMA_HOST}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -363,16 +409,12 @@ export async function generateLocal(
     });
     clearTimeout(timer);
 
-    if (!response.ok) {
-      throw new Error(`Ollama error: ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`Ollama error: ${response.status}`);
 
     const json = await response.json();
-    fullResponse = json.message?.content ?? '';
-    onToken?.(fullResponse);
-
-    return fullResponse.trim();
+    return (json.message?.content ?? '').trim();
   } catch (e) {
+    clearTimeout(timer);
     const msg = e instanceof Error ? e.message : String(e);
     console.error('[Ollama] Error:', msg);
     throw new Error('Private inference node unavailable. Check Wi-Fi and Mac Mini/Ollama status.');

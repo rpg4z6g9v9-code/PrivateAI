@@ -48,5 +48,6 @@ export interface AIRouteParams {
   messages: ConversationMessage[];
   isSensitive: boolean;
   safeMode: boolean;
-  nodeOnline?: boolean; // pre-checked node status — skip local attempt if false
+  nodeOnline?: boolean;   // pre-checked node status — skip local attempt if false
+  onToken?: (token: string) => void; // streaming callback — local route only
 }
