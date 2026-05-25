@@ -34,6 +34,9 @@ yarn-error.*
 .env
 .env*.local
 
+# Claude Code — machine-specific (example is safe to commit)
+.claude/settings.local.json
+
 # typescript
 *.tsbuildinfo
 

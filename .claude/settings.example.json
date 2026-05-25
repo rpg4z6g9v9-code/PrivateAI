@@ -1,0 +1,40 @@
+{
+  "_comment": "Copy to settings.local.json and adjust. Do not commit settings.local.json.",
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc --noEmit*)",
+      "Bash(npx expo run:ios*)",
+      "Bash(npx expo start*)",
+      "Bash(git status)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git tag*)",
+      "Bash(git push*)",
+      "Bash(rsync*)"
+    ],
+    "deny": []
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "_comment": "Block reading secret files. Copy this pattern to settings.local.json.",
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import sys,json,os; p=json.load(sys.stdin).get('file_path',''); blocked=['.env','.pem','.key','.p12','.mobileprovision']; exit(2 if any(p.endswith(b) for b in blocked) else 0)\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "_comment": "Reminder to type-check after edits. Not enforced — informational only.",
+        "matcher": "Edit",
+        "hooks": []
+      }
+    ]
+  }
+}
