@@ -29,7 +29,7 @@ import { checkPrivateNode, type PrivateNodeStatus } from '@/services/localAI';
 import {
   initConversationDB, persistMessage, loadConversation, clearConversation,
   createConversation, getLatestConversationId, getConversations, searchConversations,
-  DEFAULT_CONVO_ID, type ConversationSummary,
+  updateConversationTitle, DEFAULT_CONVO_ID, type ConversationSummary,
 } from '@/services/conversationDB';
 import type { ConversationMessage } from '@/services/claude';
 import { AppState, type AppStateStatus } from 'react-native';
@@ -96,6 +96,11 @@ export default function ChatScreen() {
   const [showHistory, setShowHistory] = useState(false);
   const [historyList, setHistoryList] = useState<ConversationSummary[]>([]);
   const [historyQuery, setHistoryQuery] = useState('');
+
+  // Rename modal
+  const [showRename, setShowRename] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<ConversationSummary | null>(null);
+  const [renameText, setRenameText] = useState('');
 
 
   // UI state
@@ -436,6 +441,36 @@ export default function ChatScreen() {
     }
   };
 
+  // ── Rename ────────────────────────────────────────────────────
+  const startRename = (conv: ConversationSummary) => {
+    console.log('[Rename] target id:', conv.id, 'current title:', conv.title);
+    setRenameTarget(conv);
+    setRenameText(conv.title ?? conv.snippet?.slice(0, 40) ?? '');
+    setShowRename(true);
+  };
+
+  const confirmRename = async () => {
+    const title = renameText.trim();
+    console.log('[Rename] new title:', JSON.stringify(title), '| target:', renameTarget?.id);
+    if (!renameTarget || !title) {
+      console.log('[Rename] aborted — no target or empty title');
+      setShowRename(false);
+      return;
+    }
+    try {
+      await updateConversationTitle(renameTarget.id, title);
+      console.log('[Rename] update complete');
+      const list = await searchConversations(historyQuery);
+      console.log('[Rename] refreshed list titles:', list.map(c => `${c.id.slice(-6)}="${c.title}"`).join(', '));
+      setHistoryList(list);
+    } catch (e) {
+      console.warn('[Rename] failed:', e);
+    } finally {
+      setShowRename(false);
+      setRenameTarget(null);
+    }
+  };
+
   // ── Handle Image Attachment ────────────────────────────────────
   const pickImage = async () => {
     try {
@@ -651,7 +686,9 @@ export default function ChatScreen() {
                     <TouchableOpacity
                       key={conv.id}
                       style={[styles.historyItem, isActive && styles.historyItemActive]}
-                      onPress={() => switchToConversation(conv.id)}>
+                      onPress={() => switchToConversation(conv.id)}
+                      onLongPress={() => startRename(conv)}
+                      delayLongPress={400}>
                       <Text style={styles.historySnippet} numberOfLines={2}>{label}</Text>
                       {isActive && <Text style={styles.historyActiveIndicator}>current</Text>}
                     </TouchableOpacity>
@@ -676,6 +713,37 @@ export default function ChatScreen() {
         </View>
       </Modal>
 
+      {/* Rename Modal */}
+      <Modal
+        visible={showRename}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setShowRename(false)}>
+        <View style={styles.renameOverlay}>
+          <View style={styles.renameSheet}>
+            <Text style={styles.renameTitle}>Rename conversation</Text>
+            <TextInput
+              style={styles.renameInput}
+              value={renameText}
+              onChangeText={setRenameText}
+              autoFocus
+              autoCapitalize="sentences"
+              autoCorrect={false}
+              maxLength={80}
+              onSubmitEditing={confirmRename}
+              returnKeyType="done"
+            />
+            <View style={styles.renameActions}>
+              <TouchableOpacity onPress={() => setShowRename(false)} style={styles.renameCancelBtn}>
+                <Text style={styles.renameCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={confirmRename} style={styles.renameConfirmBtn}>
+                <Text style={styles.renameConfirmText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -741,4 +809,13 @@ const styles = StyleSheet.create({
   historySnippet: { fontFamily: FONT, fontSize: 13, color: '#c0c0d0', lineHeight: 18 },
   historyActiveIndicator: { fontFamily: FONT, fontSize: 9, color: '#4a9eff', marginTop: 3, letterSpacing: 0.3 },
 
+  renameOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', paddingHorizontal: 32 },
+  renameSheet: { backgroundColor: '#0e1420', borderRadius: 14, padding: 20, gap: 16, borderWidth: 1, borderColor: '#1a2030' },
+  renameTitle: { fontFamily: FONT, fontSize: 13, color: '#888', letterSpacing: 0.5 },
+  renameInput: { fontFamily: FONT, fontSize: 15, color: '#e0e0f0', backgroundColor: '#141a26', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: '#252540' },
+  renameActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
+  renameCancelBtn: { paddingHorizontal: 16, paddingVertical: 8 },
+  renameCancelText: { fontFamily: FONT, fontSize: 13, color: '#666' },
+  renameConfirmBtn: { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: 'rgba(74,158,255,0.12)', borderRadius: 8 },
+  renameConfirmText: { fontFamily: FONT, fontSize: 13, color: '#4a9eff' },
 });
