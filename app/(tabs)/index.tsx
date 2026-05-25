@@ -63,6 +63,7 @@ const SILENCE_TIMEOUT_MS = 4000; // Auto-stop after 4s silence
 export default function ChatScreen() {
   // Core chat state
   const [messages, setMessages] = useState<Message[]>([]);
+  const [isRestoring, setIsRestoring] = useState(true);
   const [inputText, setInputText] = useState('');
   const [attachment, setAttachment] = useState<AttachmentImage | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -156,6 +157,8 @@ export default function ChatScreen() {
         }
       } catch (e) {
         console.warn('[DB] Load conversation failed:', e);
+      } finally {
+        setIsRestoring(false);
       }
     })();
   }, []);
@@ -428,6 +431,9 @@ export default function ChatScreen() {
 
         {/* Messages */}
         <ScrollView style={styles.messages} contentContainerStyle={{ paddingBottom: 16 }}>
+          {isRestoring && (
+            <Text style={styles.restoringText}>Restoring conversation...</Text>
+          )}
           {messages.map((msg, i) => (
             <View key={msg.id} style={[styles.msgRow, msg.role === 'user' ? styles.msgUser : styles.msgAssistant]}>
               <View style={[
@@ -532,6 +538,7 @@ const styles = StyleSheet.create({
   bubble: { maxWidth: '85%', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10 },
   msgText: { fontFamily: FONT, fontSize: 14, lineHeight: 20 },
   routeBadge: { fontFamily: FONT, fontSize: 9, color: '#6699cc', marginTop: 6, opacity: 0.7 },
+  restoringText: { fontFamily: FONT, fontSize: 11, color: '#555566', textAlign: 'center', paddingVertical: 24, letterSpacing: 0.5 },
 
   imgPreview: { width: 160, height: 120, borderRadius: 8, backgroundColor: '#1a1a2a', marginBottom: 8 },
 
