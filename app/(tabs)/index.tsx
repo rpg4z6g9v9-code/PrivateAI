@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert, Animated, Dimensions, KeyboardAvoidingView, Modal, Platform,
-  ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
+  Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import * as LocalAuth from 'expo-local-authentication';
 import Voice, { SpeechResultsEvent, SpeechErrorEvent } from '@react-native-voice/voice';
@@ -446,7 +446,9 @@ export default function ChatScreen() {
     console.log('[Rename] target id:', conv.id, 'current title:', conv.title);
     setRenameTarget(conv);
     setRenameText(conv.title ?? conv.snippet?.slice(0, 40) ?? '');
-    setShowRename(true);
+    // Close history modal first — nested modals fight touch responders on iOS
+    setShowHistory(false);
+    setTimeout(() => setShowRename(true), 100);
   };
 
   const confirmRename = async () => {
@@ -734,12 +736,22 @@ export default function ChatScreen() {
               returnKeyType="done"
             />
             <View style={styles.renameActions}>
-              <TouchableOpacity onPress={() => setShowRename(false)} style={styles.renameCancelBtn}>
+              <Pressable
+                onPress={() => {
+                  console.log('[Rename] cancel pressed');
+                  setShowRename(false);
+                }}
+                style={styles.renameCancelBtn}>
                 <Text style={styles.renameCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={confirmRename} style={styles.renameConfirmBtn}>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  console.log('[Rename] save pressed');
+                  confirmRename();
+                }}
+                style={styles.renameConfirmBtn}>
                 <Text style={styles.renameConfirmText}>Save</Text>
-              </TouchableOpacity>
+              </Pressable>
             </View>
           </View>
         </View>
