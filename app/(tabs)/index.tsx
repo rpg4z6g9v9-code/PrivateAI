@@ -28,8 +28,8 @@ import { routeAI } from '@/services/aiRouter';
 import { checkPrivateNode, type PrivateNodeStatus } from '@/services/localAI';
 import {
   initConversationDB, persistMessage, loadConversation, clearConversation,
-  createConversation, getLatestConversationId, getConversations, DEFAULT_CONVO_ID,
-  type ConversationSummary,
+  createConversation, getLatestConversationId, getConversations, updateConversationTitle,
+  DEFAULT_CONVO_ID, type ConversationSummary,
 } from '@/services/conversationDB';
 import type { ConversationMessage } from '@/services/claude';
 import { AppState, type AppStateStatus } from 'react-native';
@@ -313,6 +313,12 @@ export default function ChatScreen() {
       setAttachment(null);
       persistMessage(userMsg, activeConversationId).catch(e => console.warn('[DB] persist user msg failed:', e));
 
+      // Auto-title: set from first user message (truncated). Only on the first message in this session.
+      if (messages.length === 0) {
+        const title = text.trim().slice(0, 40);
+        updateConversationTitle(activeConversationId, title).catch(() => {});
+      }
+
       // Route to AI (cloud or local, respecting security constraints)
       const result = await routeAI({
         messages: newMessages.map(m => ({
@@ -593,9 +599,8 @@ export default function ChatScreen() {
                 <Text style={styles.historyEmpty}>No previous conversations</Text>
               ) : historyList.map(conv => {
                 const isActive = conv.id === activeConversationId;
-                const snippet = conv.snippet
-                  ? conv.snippet.slice(0, 60) + (conv.snippet.length > 60 ? '…' : '')
-                  : '(empty)';
+                const label = conv.title
+                  ?? (conv.snippet ? conv.snippet.slice(0, 60) + (conv.snippet.length > 60 ? '…' : '') : '(empty)');
                 const when = conv.lastActive
                   ? new Date(conv.lastActive).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
                   : '';
@@ -604,7 +609,7 @@ export default function ChatScreen() {
                     key={conv.id}
                     style={[styles.historyItem, isActive && styles.historyItemActive]}
                     onPress={() => switchToConversation(conv.id)}>
-                    <Text style={styles.historySnippet} numberOfLines={2}>{snippet}</Text>
+                    <Text style={styles.historySnippet} numberOfLines={2}>{label}</Text>
                     <Text style={styles.historyWhen}>{when}</Text>
                   </TouchableOpacity>
                 );

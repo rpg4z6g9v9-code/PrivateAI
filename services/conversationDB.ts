@@ -145,7 +145,8 @@ export type ConversationSummary = {
   id: string;
   createdAt: number;
   lastActive: number | null;
-  snippet: string | null; // first message content, truncated
+  title: string | null;    // explicitly set title (first user message, editable later)
+  snippet: string | null;  // first message content, fallback display
 };
 
 /**
@@ -157,13 +158,22 @@ export async function getConversations(): Promise<ConversationSummary[]> {
   return db.getAllAsync<ConversationSummary>(
     `SELECT
        c.id,
-       c.created_at AS createdAt,
-       (SELECT timestamp FROM messages WHERE conversation_id = c.id ORDER BY timestamp DESC LIMIT 1) AS lastActive,
-       (SELECT content   FROM messages WHERE conversation_id = c.id ORDER BY timestamp ASC  LIMIT 1) AS snippet
+       c.created_at                                                                                    AS createdAt,
+       c.title,
+       (SELECT timestamp FROM messages WHERE conversation_id = c.id ORDER BY timestamp DESC LIMIT 1)   AS lastActive,
+       (SELECT content   FROM messages WHERE conversation_id = c.id ORDER BY timestamp ASC  LIMIT 1)   AS snippet
      FROM conversations c
      WHERE EXISTS (SELECT 1 FROM messages WHERE conversation_id = c.id)
      ORDER BY lastActive DESC
      LIMIT 20`
+  );
+}
+
+export async function updateConversationTitle(conversationId: string, title: string): Promise<void> {
+  if (!db) return;
+  await db.runAsync(
+    'UPDATE conversations SET title = ? WHERE id = ?',
+    [title, conversationId]
   );
 }
 
