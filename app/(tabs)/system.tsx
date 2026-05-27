@@ -31,7 +31,7 @@ import {
 } from '@/services/tools/webSearch';
 
 const FONT = 'SpaceMono-Regular';
-const VERSION_TAG = 'stable-memory-workspace-v1';
+const VERSION_TAG = 'stable-websearch-gateway-v2';
 const CLOUD_MODEL = 'claude-sonnet-4-6';
 const LOCAL_MODEL = 'phi4-mini';
 

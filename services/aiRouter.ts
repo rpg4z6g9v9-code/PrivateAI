@@ -42,7 +42,7 @@ async function resolveCapabilities(): Promise<Capabilities> {
 
 // ── System Prompts ──────────────────────────────────────────
 
-const VERSION_TAG = 'stable-memory-workspace-v1';
+const VERSION_TAG = 'stable-websearch-gateway-v2';
 
 function currentDate(): string {
   return new Date().toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'long', day: 'numeric' });

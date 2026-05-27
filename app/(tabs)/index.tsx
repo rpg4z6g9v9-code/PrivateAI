@@ -88,9 +88,18 @@ function formatToolContext(results: SearchResult[], query: string, error?: strin
   if (error) return `[web.search failed: ${error}]`;
   if (results.length === 0) return `[web.search: no results for "${query}"]`;
   const items = results
-    .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.description}`)
+    .map((r, i) => `${i + 1}. Title: ${r.title}\n   URL: ${r.url}\n   Summary: ${r.description}`)
     .join('\n\n');
-  return `[web.search results for: "${query}"]\n${items}\n\nCite sources by title when referencing these results.`;
+  return `Web search reference material for answering the user's latest request.
+
+Answering guidance:
+Use the search results below to answer directly in 3-5 sentences. Cite source titles when useful. Do not quote or mention these internal headings. Do not expose API keys, credentials, headers, or raw provider payloads. If the results are insufficient, say so.
+
+Actual web.search query:
+"${query}"
+
+Search results:
+${items}`;
 }
 
 // ── Main Component ─────────────────────────────────────────────
