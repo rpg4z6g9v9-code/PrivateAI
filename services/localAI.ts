@@ -72,6 +72,9 @@ const STOP_TOKENS = ['</s>', '<|end|>', '<|eot_id|>', '<|im_end|>', '<|endoftext
 
 let llamaContext: LlamaContext | null = null;
 
+// Transition-only node logging — suppress repeated same-state logs
+let _lastNodeOnline: boolean | null = null;
+
 // ─── Model file helpers ───────────────────────────────────────
 
 export async function isModelDownloaded(): Promise<boolean> {
@@ -545,19 +548,27 @@ export async function checkPrivateNode(): Promise<PrivateNodeStatus> {
     const latency = Date.now() - start;
 
     if (!res.ok) {
-      console.log(`[PrivateNode] offline · HTTP ${res.status}`);
+      if (_lastNodeOnline !== false) {
+        console.log(`[PrivateNode] offline · HTTP ${res.status}`);
+        _lastNodeOnline = false;
+      }
       return { online: false, host, latency, models: [] };
     }
 
     const json = await res.json();
     const models: string[] = (json.models ?? []).map((m: { name: string }) => m.name);
 
-    console.log(`[PrivateNode] online · ${models.join(', ') || 'no models'} · ${latency}ms`);
+    if (_lastNodeOnline !== true) {
+      console.log(`[PrivateNode] online · ${models.join(', ') || 'no models'} · ${latency}ms`);
+      _lastNodeOnline = true;
+    }
     return { online: true, host, latency, models };
 
   } catch (e) {
-    const latency = Date.now() - start;
-    console.log(`[PrivateNode] offline · check Wi-Fi or Ollama status`);
+    if (_lastNodeOnline !== false) {
+      console.log(`[PrivateNode] offline · check Wi-Fi or Ollama status`);
+      _lastNodeOnline = false;
+    }
     return { online: false, host, latency: null, models: [] };
   }
 }

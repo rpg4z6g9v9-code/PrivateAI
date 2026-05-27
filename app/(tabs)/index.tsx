@@ -13,6 +13,7 @@ import {
   Alert, Animated, Dimensions, KeyboardAvoidingView, Modal, Platform,
   Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
+import { useFocusEffect, router } from 'expo-router';
 import * as LocalAuth from 'expo-local-authentication';
 import Voice, { SpeechResultsEvent, SpeechErrorEvent } from '@react-native-voice/voice';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,6 +26,7 @@ import { networkMonitor } from '@/services/networkMonitor';
 import { checkInjection, sanitizeOutput, classifyData, logSecurityEvent } from '@/services/securityGateway';
 import { canAccessVault, unlockVault, lockVault } from '@/services/dataVault';
 import { routeAI } from '@/services/aiRouter';
+import { webSearch, type SearchResult } from '@/services/tools/webSearch';
 import { checkPrivateNode, type PrivateNodeStatus } from '@/services/localAI';
 import {
   initConversationDB, persistMessage, loadConversation, clearConversation,
@@ -62,6 +64,34 @@ const AUTH_LOCKED_KEY = 'auth_locked_v1';
 const SETTINGS_KEY = 'voice_settings_v1';
 const BACKGROUND_LOCK_MS = 5 * 60 * 1000; // 5 minutes
 const SILENCE_TIMEOUT_MS = 4000; // Auto-stop after 4s silence
+
+// ── Web search integration ──────────────────────────────────────
+
+const SEARCH_PATTERNS = [
+  /\bweb search\b/i,
+  /\bsearch (for|the web)?\b/i,
+  /\blook up\b/i,
+  /\bwhat.s (the )?(latest|current|recent|happening|news)\b/i,
+  /\b(latest|current|recent) (news|updates?|events?|prices?|weather|info)\b/i,
+  /\bwhat (is|are) (happening|going on)\b/i,
+  /^web:\s/i,   // explicit prefix: "web: ..."
+];
+
+/** Returns query string if message contains search intent, null otherwise. */
+function detectSearchQuery(text: string): string | null {
+  if (SEARCH_PATTERNS.some(p => p.test(text))) return text.trim();
+  return null;
+}
+
+/** Format search results as a structured context block for the system prompt. */
+function formatToolContext(results: SearchResult[], query: string, error?: string): string {
+  if (error) return `[web.search failed: ${error}]`;
+  if (results.length === 0) return `[web.search: no results for "${query}"]`;
+  const items = results
+    .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.description}`)
+    .join('\n\n');
+  return `[web.search results for: "${query}"]\n${items}\n\nCite sources by title when referencing these results.`;
+}
 
 // ── Main Component ─────────────────────────────────────────────
 export default function ChatScreen() {
@@ -108,6 +138,13 @@ export default function ChatScreen() {
   // UI state
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const sidebarX = useRef(new Animated.Value(-200)).current;
+
+  // Dismiss history modal when navigating away from this screen
+  useFocusEffect(
+    useCallback(() => {
+      return () => setShowHistory(false);
+    }, [])
+  );
 
   // ── Face ID Authentication ────────────────────────────────────
   const authenticate = useCallback(async () => {
@@ -334,6 +371,18 @@ export default function ChatScreen() {
         ));
       };
 
+      // Tool execution: run web search before routing if intent detected.
+      // Results are injected into the system prompt for this turn only.
+      let toolContext: string | undefined;
+      const searchQuery = detectSearchQuery(text);
+      if (searchQuery) {
+        const searchRes = await webSearch(searchQuery, {
+          conversationId: activeConversationId,
+          route: freshStatus.online ? 'local' : 'cloud',
+        });
+        toolContext = formatToolContext(searchRes.results, searchRes.query, searchRes.error);
+      }
+
       // Route to AI (cloud or local, respecting security constraints)
       const result = await routeAI({
         messages: newMessages.map(m => ({
@@ -344,6 +393,7 @@ export default function ChatScreen() {
         safeMode,
         nodeOnline: freshStatus.online,
         onToken: freshStatus.online ? onToken : undefined,
+        toolContext,
       });
 
       streamingMsgIdRef.current = null;
@@ -635,6 +685,9 @@ export default function ChatScreen() {
           </View>
         )}
 
+        {/* Knowledge cutoff note */}
+        <Text style={styles.cutoffNote}>Knowledge has a training cutoff — may not reflect recent events.</Text>
+
         {/* Input area */}
         <View style={styles.inputArea}>
           <View style={styles.inputCard}>
@@ -672,9 +725,23 @@ export default function ChatScreen() {
         <View style={styles.historyOverlay}>
           <View style={styles.historySheet}>
             <View style={styles.historyHeader}>
-              <Text style={styles.historyTitle}>Conversations</Text>
+              <Text style={styles.historyTitle}>Navigation</Text>
               <TouchableOpacity onPress={() => setShowHistory(false)}>
                 <Text style={styles.historyClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.historyNavRow}>
+              <TouchableOpacity
+                style={styles.historyNavBtn}
+                onPress={() => { setShowHistory(false); router.push('/(tabs)/system' as any); }}>
+                <Text style={styles.historyNavText}>// system</Text>
+                <Text style={styles.historyNavArrow}>›</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.historyNavBtn}
+                onPress={() => { setShowHistory(false); router.push('/(tabs)/finance' as any); }}>
+                <Text style={styles.historyNavText}>// finance</Text>
+                <Text style={styles.historyNavArrow}>›</Text>
               </TouchableOpacity>
             </View>
             <View style={styles.historySearchRow}>
@@ -800,6 +867,7 @@ const styles = StyleSheet.create({
   attachLabel: { fontFamily: FONT, fontSize: 12, color: '#4a9eff', flex: 1 },
   attachRemove: { fontFamily: FONT, fontSize: 16, color: '#888', paddingHorizontal: 8 },
 
+  cutoffNote: { fontFamily: FONT, fontSize: 9, color: '#2a2a3a', textAlign: 'center', paddingHorizontal: 16, paddingBottom: 4, letterSpacing: 0.3 },
   inputArea: { paddingHorizontal: 12, paddingVertical: 8, paddingBottom: 20 },
   inputCard: { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: 'rgba(20, 20, 35, 0.92)', borderRadius: 24, borderWidth: 1, borderColor: '#252540', paddingHorizontal: 12, paddingVertical: 6, gap: 8 },
   input: { flex: 1, fontFamily: FONT, fontSize: 14, color: '#d0d0e8', paddingVertical: 8, maxHeight: 80 },
@@ -815,6 +883,10 @@ const styles = StyleSheet.create({
   historyHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#1a1a2a' },
   historyTitle: { fontFamily: FONT, fontSize: 14, fontWeight: '600', color: '#c0c0d0', letterSpacing: 1 },
   historyClose: { fontFamily: FONT, fontSize: 16, color: '#888', paddingHorizontal: 4 },
+  historyNavRow: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#1a1a2a', gap: 8 },
+  historyNavBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1, borderColor: '#1a1a2a', borderRadius: 8 },
+  historyNavText: { fontFamily: FONT, fontSize: 11, color: '#4a7aaa', letterSpacing: 1 },
+  historyNavArrow: { fontFamily: FONT, fontSize: 14, color: '#334455' },
   historySearchRow: { paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#1a1a2a' },
   historySearch: { fontFamily: FONT, fontSize: 13, color: '#c0c0d0', backgroundColor: '#141a26', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
   historyList: { paddingHorizontal: 16, paddingTop: 8 },

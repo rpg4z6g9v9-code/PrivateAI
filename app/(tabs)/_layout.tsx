@@ -13,6 +13,8 @@ export default function TabLayout() {
       <Stack.Screen name="controlroom" />
       <Stack.Screen name="security" />
       <Stack.Screen name="dashboard" />
+      <Stack.Screen name="finance" />
+      <Stack.Screen name="system" />
     </Stack>
   );
 }

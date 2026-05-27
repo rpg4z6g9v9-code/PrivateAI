@@ -234,50 +234,45 @@ export default function OnboardingScreen() {
           </View>
         )}
 
-        {/* ── Step 2: Meet Atlas ── */}
+        {/* ── Step 2: How it works ── */}
         {step === 2 && (
           <View style={s.stepContainer}>
-            <Text style={s.stepTitle}>meet your team</Text>
+            <Text style={s.stepTitle}>how it works</Text>
 
-            <View style={s.personaCard}>
-              <View style={[s.personaDot, { backgroundColor: '#4db8ff' }]} />
-              <View style={s.personaInfo}>
-                <Text style={[s.personaName, { color: '#4db8ff' }]}>Atlas</Text>
-                <Text style={s.personaRole}>Strategic advisor — your default persona</Text>
-              </View>
-            </View>
-            <View style={s.personaCard}>
-              <View style={[s.personaDot, { backgroundColor: '#ff6b6b' }]} />
-              <View style={s.personaInfo}>
-                <Text style={[s.personaName, { color: '#ff6b6b' }]}>Vera</Text>
-                <Text style={s.personaRole}>Health monitor — medical data stays on-device</Text>
-              </View>
-            </View>
-            <View style={s.personaCard}>
-              <View style={[s.personaDot, { backgroundColor: '#ff9500' }]} />
-              <View style={s.personaInfo}>
-                <Text style={[s.personaName, { color: '#ff9500' }]}>Cipher</Text>
-                <Text style={s.personaRole}>Security analyst — threat detection & privacy</Text>
-              </View>
-            </View>
-            <View style={s.personaCard}>
-              <View style={[s.personaDot, { backgroundColor: '#a855f7' }]} />
-              <View style={s.personaInfo}>
-                <Text style={[s.personaName, { color: '#a855f7' }]}>Lumen</Text>
-                <Text style={s.personaRole}>Research specialist — deep knowledge synthesis</Text>
-              </View>
-            </View>
-            <View style={s.personaCard}>
-              <View style={[s.personaDot, { backgroundColor: '#00ff00' }]} />
-              <View style={s.personaInfo}>
-                <Text style={[s.personaName, { color: '#00ff00' }]}>Atom</Text>
-                <Text style={s.personaRole}>Personal assistant — general-purpose helper</Text>
-              </View>
+            <View style={s.infoCard}>
+              <Text style={[s.infoTitle, { color: '#00ff88' }]}>Private node (Mac Mini)</Text>
+              <Text style={s.infoDesc}>
+                AI runs locally on your Mac Mini at home. Messages stay on your network — nothing goes to the internet. The node indicator shows connection status and latency in ms.
+              </Text>
             </View>
 
-            <Text style={s.stepDesc}>
-              Tap the persona dot in the chat bar to switch between them. Each has their own memory and expertise.
-            </Text>
+            <View style={s.infoCard}>
+              <Text style={[s.infoTitle, { color: '#4db8ff' }]}>Cloud fallback (Claude)</Text>
+              <Text style={s.infoDesc}>
+                When the private node is offline, general queries route to Claude via the Anthropic API. Medical or sensitive data is never sent to cloud — it waits for the local node.
+              </Text>
+            </View>
+
+            <View style={s.infoCard}>
+              <Text style={[s.infoTitle, { color: '#ccc' }]}>Local is slower</Text>
+              <Text style={s.infoDesc}>
+                The on-device model (phi4-mini) is smaller and takes a few extra seconds to respond. Cloud responses are faster. Both routes show route and latency in the chat.
+              </Text>
+            </View>
+
+            <View style={s.infoCard}>
+              <Text style={[s.infoTitle, { color: '#ccc' }]}>Conversation history</Text>
+              <Text style={s.infoDesc}>
+                Tap the clock icon to browse past chats. Long-press a conversation to rename it. Swipe left to archive. Search by typing in the history panel.
+              </Text>
+            </View>
+
+            <View style={s.infoCard}>
+              <Text style={[s.infoTitle, { color: '#f59e0b' }]}>Knowledge cutoff</Text>
+              <Text style={s.infoDesc}>
+                AI models have a training cutoff — they may not know about recent events, current prices, or news. There is no live web access.
+              </Text>
+            </View>
 
             <TouchableOpacity style={s.primaryBtn} onPress={handleComplete}>
               <Text style={s.primaryBtnText}>start chatting</Text>
@@ -356,15 +351,14 @@ const s = StyleSheet.create({
   permDesc: { fontFamily: FONT, fontSize: 10, color: '#555' },
   permAction: { fontFamily: FONT, fontSize: 11, color: '#4db8ff', letterSpacing: 0.5 },
 
-  // Persona cards
-  personaCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingVertical: 10, paddingHorizontal: 4,
+  // Info cards (step 2)
+  infoCard: {
+    paddingVertical: 12, paddingHorizontal: 14,
+    borderLeftWidth: 2, borderLeftColor: '#1a2a3a',
+    gap: 4,
   },
-  personaDot: { width: 10, height: 10, borderRadius: 5 },
-  personaInfo: { flex: 1, gap: 2 },
-  personaName: { fontFamily: FONT, fontSize: 14, fontWeight: '600' },
-  personaRole: { fontFamily: FONT, fontSize: 10, color: '#666' },
+  infoTitle: { fontFamily: FONT, fontSize: 12, fontWeight: '600', letterSpacing: 0.5 },
+  infoDesc: { fontFamily: FONT, fontSize: 11, color: '#555', lineHeight: 18 },
 });
 
 // ─── Exported helpers for checking onboarding state ──────────

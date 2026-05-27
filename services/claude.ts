@@ -50,4 +50,5 @@ export interface AIRouteParams {
   safeMode: boolean;
   nodeOnline?: boolean;   // pre-checked node status — skip local attempt if false
   onToken?: (token: string) => void; // streaming callback — local route only
+  toolContext?: string;  // structured tool results injected for this turn
 }

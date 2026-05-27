@@ -251,6 +251,22 @@ export async function unarchiveConversation(conversationId: string): Promise<voi
   );
 }
 
+// ── Stats ─────────────────────────────────────────────────────
+
+export async function getConversationStats(): Promise<{
+  total: number;
+  lastActive: number | null;
+}> {
+  if (!db) return { total: 0, lastActive: null };
+  const row = await db.getFirstAsync<{ total: number; lastActive: number | null }>(
+    `SELECT COUNT(*) AS total,
+            (SELECT MAX(timestamp) FROM messages) AS lastActive
+     FROM conversations
+     WHERE COALESCE(archived, 0) = 0`
+  );
+  return { total: row?.total ?? 0, lastActive: row?.lastActive ?? null };
+}
+
 // ── Read ──────────────────────────────────────────────────────
 
 export async function loadConversation(conversationId: string): Promise<PersistedMessage[]> {

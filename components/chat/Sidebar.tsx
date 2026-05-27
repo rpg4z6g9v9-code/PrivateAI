@@ -201,6 +201,16 @@ export default function Sidebar(props: SidebarProps) {
             <Text style={[s.navText, { color: '#a855f7' }]}>// control room</Text>
             <Text style={s.navArrow}>›</Text>
           </TouchableOpacity>
+          <TouchableOpacity onPress={() => { onClose(); router.push('/(tabs)/finance'); }} style={s.navBtn}>
+            <Text style={[s.navIcon, { color: '#4db8ff' }]}>$</Text>
+            <Text style={[s.navText, { color: '#4db8ff' }]}>// finance</Text>
+            <Text style={s.navArrow}>›</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => { onClose(); router.push('/(tabs)/system' as any); }} style={s.navBtn}>
+            <Text style={[s.navIcon, { color: '#555' }]}>◈</Text>
+            <Text style={[s.navText, { color: '#555' }]}>// system</Text>
+            <Text style={s.navArrow}>›</Text>
+          </TouchableOpacity>
 
           {/* New Chat */}
           <TouchableOpacity style={s.newChatBtn} onPress={onNewChat}>
