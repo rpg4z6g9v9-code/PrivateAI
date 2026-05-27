@@ -26,7 +26,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // Persisted so the user can change it in Settings without a rebuild.
 
 const OLLAMA_HOST_KEY = 'ollama_host_v1';
-const DEFAULT_OLLAMA_HOST = '192.168.4.43:11434';
+const DEFAULT_OLLAMA_HOST = '192.168.4.52:11434';
 
 export async function getOllamaHost(): Promise<string> {
   try {
@@ -519,7 +519,7 @@ export function isModelLoaded(): boolean {
 
 /** True when a Mac Mini Ollama host is configured (always true if OLLAMA_HOST is set). */
 export function isMacMiniConfigured(): boolean {
-  return true; // 192.168.4.43:11434 is hardcoded in generateLocal
+  return true; // 192.168.4.52:11434 is hardcoded in generateLocal
 }
 
 export type PrivateNodeStatus = {

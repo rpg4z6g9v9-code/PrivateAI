@@ -81,7 +81,7 @@ Routing is based on operational profiles, not identity framing.
 | Strategy   | Planning, analysis, prioritization, systems thinking | Options, roadmap, scenarios         |
 | Mediator   | Combine perspectives, sequence workflows             | Ambiguity, coordination needed      |
 
-**Node routing:** Private node (Ollama/phi4-mini at 192.168.4.43:11434) → cloud fallback (Claude API).
+**Node routing:** Private node (Ollama/phi4-mini at 192.168.4.52:11434) → cloud fallback (Claude API).
 Routing uses a local variable from a fresh pre-send health check — never React state.
 
 ---

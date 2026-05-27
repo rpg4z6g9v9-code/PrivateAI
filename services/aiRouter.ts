@@ -265,7 +265,7 @@ async function tryLocalRoute(
     return {
       text,
       route: 'local',
-      model: 'llama-1b',
+      model: 'phi4-mini',
       latency,
     };
   } catch (e) {

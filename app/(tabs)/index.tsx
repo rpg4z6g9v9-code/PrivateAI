@@ -381,6 +381,14 @@ export default function ChatScreen() {
           route: freshStatus.online ? 'local' : 'cloud',
         });
         toolContext = formatToolContext(searchRes.results, searchRes.query, searchRes.error);
+        // Screen external tool output before prompt injection.
+        // Web search results arrive from an untrusted external source and must be
+        // checked for injection patterns before entering the system prompt.
+        const toolContextCheck = checkInjection(toolContext);
+        if (toolContextCheck.detected) {
+          logSecurityEvent('tool_output_injection', 'web.search result').catch(() => {});
+          toolContext = '[web.search: result filtered — injection pattern detected]';
+        }
       }
 
       // Route to AI (cloud or local, respecting security constraints)

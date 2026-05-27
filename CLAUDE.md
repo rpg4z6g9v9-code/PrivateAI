@@ -37,7 +37,7 @@ npx tsc --noEmit
 - Sensitive data never routes to cloud — enforced in aiRouter.ts
 
 ## Routing
-- Private node: Ollama/phi4-mini at 192.168.4.43:11434
+- Private node: Ollama/phi4-mini at 192.168.4.52:11434
 - Cloud fallback: Claude API (claude-sonnet-4-6)
 - Node check happens before every send — routing uses local var, not React state
 

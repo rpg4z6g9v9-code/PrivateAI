@@ -9,7 +9,7 @@
 ## Current Stable State
 
 ### Infrastructure
-- Private node: Mac Mini at `192.168.4.43:11434`, phi4-mini:latest
+- Private node: Mac Mini at `192.168.4.52:11434`, phi4-mini:latest
 - Ollama LAN binding: `OLLAMA_HOST=0.0.0.0` — LaunchAgent written at `~/Library/LaunchAgents/com.ollama.ollama.plist`
 - Cloud fallback: Claude API (`claude-sonnet-4-20250514`) via `EXPO_PUBLIC_CLAUDE_API_KEY`
 - Routing: local-first, cloud fallback, transition-only logs
