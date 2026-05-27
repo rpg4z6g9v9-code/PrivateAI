@@ -470,3 +470,151 @@ PrivateAI remains the core system.
 OpenClaw remains reference-only and contained inside `~/OpenClawSandbox`.
 
 Do not proceed into deeper OpenClaw onboarding unless explicitly approved after this smoke-test summary is reviewed.
+
+---
+
+## Phase I — OpenClaw sandbox onboarding (2026-05-27)
+
+### Phase I-A2 — Containment audit (read-only)
+
+Before running onboarding, a read-only containment audit was run via SSH to assess prior state.
+
+**Findings:**
+
+| Item | Result | Notes |
+|---|---|---|
+| OpenClaw binary | FOUND | `/Users/macmini/.local/bin/openclaw` — 2026.5.26 |
+| `~/OpenClawSandbox` exists | YES | Contains only `gateway.log` |
+| `~/.openclaw` exists | YES | Prior onboarding state present |
+| `~/.clawdbot` | MISSING | Clean |
+| `~/OpenClawSandbox/.openclaw` | MISSING | No sandbox-local state yet |
+| OpenClaw process (PID 3698) | STALE | Gone by next check — was the audit subprocess |
+| Listener on 127.0.0.1:18789 | NONE | ECONNREFUSED confirmed |
+| Listener on 1455 | NONE | Clean |
+| LaunchAgent/launchctl entry | NONE | Not installed, not loaded |
+| Gateway status | NOT RUNNING | Service not installed; loopback bind configured |
+
+**`~/.openclaw` prior state files (by path only — no content read):**
+
+```
+~/.openclaw/devices/paired.json
+~/.openclaw/devices/pending.json
+~/.openclaw/flows/registry.sqlite
+~/.openclaw/flows/registry.sqlite-shm
+~/.openclaw/flows/registry.sqlite-wal
+~/.openclaw/identity/device-auth.json
+~/.openclaw/identity/device.json
+~/.openclaw/logs/config-audit.jsonl
+~/.openclaw/logs/config-health.json
+~/.openclaw/openclaw.json
+~/.openclaw/openclaw.json.last-good
+~/.openclaw/plugins/installs.json
+~/.openclaw/tasks/runs.sqlite
+~/.openclaw/tasks/runs.sqlite-shm
+~/.openclaw/tasks/runs.sqlite-wal
+~/.openclaw/update-check.json
+```
+
+Decision: preserve `~/.openclaw` as historical/default-state evidence. Do not read auth/identity files — path-level evidence is sufficient. Do not reuse `~/.openclaw` for new onboarding. All future onboarding must use explicit sandbox-local state paths.
+
+### Phase I-A3 — PID investigation (read-only)
+
+PID 3698 (flagged in I-A2) was investigated:
+
+- PID 3698 not found — process had exited normally
+- No OpenClaw/node processes running
+- No TCP listeners on 18789 or 1455
+- No LaunchAgent/launchctl entries
+
+Assessment: PID 3698 was the `openclaw --version` or `openclaw gateway status` subprocess from the I-A2 audit. No persistent process. Cleared to proceed.
+
+### Phase I-B1 — Flag check (read-only)
+
+All required onboard flags confirmed present:
+
+| Flag | Present |
+|---|---|
+| `--workspace` | YES (default: `~/.openclaw/workspace`) |
+| `--no-install-daemon` | YES |
+| `--skip-daemon` | YES |
+| `--skip-channels` | YES |
+| `--skip-skills` | YES |
+| `--skip-health` | YES |
+| `--flow` | YES (`quickstart\|advanced\|manual\|import`) |
+
+Flag check: PASS. Cleared to proceed to Phase I-B2.
+
+### Phase I-B2 — Sandbox-scoped onboarding attempt
+
+**Command used (exact):**
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+mkdir -p "$HOME/OpenClawSandbox/.openclaw-state"
+export OPENCLAW_STATE_DIR="$HOME/OpenClawSandbox/.openclaw-state"
+export OPENCLAW_CONFIG_PATH="$HOME/OpenClawSandbox/.openclaw-state/openclaw.json"
+cd "$HOME/OpenClawSandbox"
+
+openclaw onboard \
+  --workspace "$HOME/OpenClawSandbox" \
+  --flow manual \
+  --no-install-daemon \
+  --skip-daemon \
+  --skip-channels \
+  --skip-skills \
+  --skip-health
+```
+
+**Outcome: intentionally aborted.**
+
+Onboarding wizard started and was deliberately stopped before completion per the gating policy. No daemon, gateway, LaunchAgent, shell automation, browser automation, OAuth, account linking, API keys, credentials, external channels, or Homebrew installs were accepted.
+
+**Post-abort state:**
+
+| Check | Result | Notes |
+|---|---|---|
+| OpenClaw process running | NO | Clean |
+| Listener on 127.0.0.1:18789 | NO | ECONNREFUSED |
+| LaunchAgent/launchctl entry | NO | Not installed |
+| Gateway status | NOT RUNNING | Service not installed, config missing |
+| `~/.openclaw` modified | PRESERVED | Not inspected post-abort; treated as untouched |
+| PrivateAI code/config changed | NO | Untouched |
+| Files outside sandbox created | NO | Abort was clean |
+
+**Gateway status (post-abort, with sandbox env):**
+
+- Service: not installed
+- Config: missing (`OPENCLAW_CONFIG_PATH` not written)
+- Connectivity probe: failed — ECONNREFUSED 127.0.0.1:18789
+
+---
+
+## Permanent rules for future OpenClaw work
+
+All future OpenClaw commands (including status checks, gateway probes, and any onboarding retries) must include the sandbox-local state variables:
+
+```bash
+export OPENCLAW_STATE_DIR="$HOME/OpenClawSandbox/.openclaw-state"
+export OPENCLAW_CONFIG_PATH="$HOME/OpenClawSandbox/.openclaw-state/openclaw.json"
+```
+
+Never run OpenClaw commands without these variables set. Omitting them causes OpenClaw to fall back to `~/.openclaw`, which is preserved historical state and must not be modified.
+
+**No daemon/gateway install without a separate explicit proposal.** `openclaw gateway install` and any managed startup path (LaunchAgent, start-at-login, daemon runtime) remain blocked until a separate proposal is reviewed and approved.
+
+---
+
+## Operational note — chat renderer truncation
+
+Long pasted control blocks (onboarding briefs, gate policies, multi-section SSH scripts) may visually truncate or corrupt in the chat renderer. This does not affect terminal execution. Rule: always validate guard checks locally before executing any pasted command block. Do not treat visual truncation in chat as evidence of command modification.
+
+---
+
+## Six standing refinements (post-onboarding)
+
+1. **Record exact command.** Every OpenClaw onboarding or gateway operation must record the exact command including every `OPENCLAW_*` variable in this file.
+2. **Default-state untouched note.** After any onboarding attempt, compare `~/.openclaw` before/after by path only (no content). Document whether it changed.
+3. **Wizard audit trail.** Store wizard prompts and answers as an audit trail, excluding secrets, API keys, and auth material.
+4. **Permanent env requirement.** Future OpenClaw commands must include `OPENCLAW_STATE_DIR` and `OPENCLAW_CONFIG_PATH`. No exceptions.
+5. **Post-onboarding PrivateAI smoke check.** After any completed onboarding, confirm `phi4-mini`, `nomic-embed-text`, and `web.search` remain stable.
+6. **No daemon/gateway install without proposal.** Gateway install, daemon, LaunchAgent, and managed startup require a separate written proposal before any execution.
