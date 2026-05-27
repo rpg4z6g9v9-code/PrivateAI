@@ -259,7 +259,7 @@ async function tryLocalRoute(
   try {
     const start = Date.now();
     const lastMessage = messages[messages.length - 1]?.content ?? '';
-    const text = await generateLocal(lastMessage, buildLocalSystemPrompt('local', capabilities, toolContext), onToken);
+    const text = await generateLocal(lastMessage, buildLocalSystemPrompt('local', capabilities, toolContext), onToken, messages);
     const latency = Date.now() - start;
 
     return {

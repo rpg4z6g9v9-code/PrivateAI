@@ -378,6 +378,7 @@ export async function generateLocal(
   userMessage: string,
   systemPrompt?: string,
   onToken?: (token: string) => void,
+  conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>,
 ): Promise<string> {
   const OLLAMA_HOST = await getOllamaHost();
 
@@ -385,7 +386,16 @@ export async function generateLocal(
   if (systemPrompt?.trim()) {
     messages.push({ role: 'system', content: systemPrompt.trim() });
   }
-  messages.push({ role: 'user', content: userMessage.trim() });
+  if (conversationHistory && conversationHistory.length > 0) {
+    // Pass up to last 10 messages for context. Filter to user/assistant only.
+    const MAX_HISTORY = 10;
+    const safeHistory = conversationHistory
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .slice(-MAX_HISTORY);
+    messages.push(...safeHistory);
+  } else {
+    messages.push({ role: 'user', content: userMessage.trim() });
+  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 90_000);
