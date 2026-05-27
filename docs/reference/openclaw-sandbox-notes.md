@@ -618,3 +618,71 @@ Long pasted control blocks (onboarding briefs, gate policies, multi-section SSH 
 4. **Permanent env requirement.** Future OpenClaw commands must include `OPENCLAW_STATE_DIR` and `OPENCLAW_CONFIG_PATH`. No exceptions.
 5. **Post-onboarding PrivateAI smoke check.** After any completed onboarding, confirm `phi4-mini`, `nomic-embed-text`, and `web.search` remain stable.
 6. **No daemon/gateway install without proposal.** Gateway install, daemon, LaunchAgent, and managed startup require a separate written proposal before any execution.
+
+---
+
+## Phase I-C — Foreground gateway validation (2026-05-27)
+
+### What was tested
+
+```bash
+openclaw gateway run \
+  --bind loopback \
+  --port 18789 \
+  --auth none \
+  --allow-unconfigured
+```
+
+Env: `OPENCLAW_STATE_DIR` + `OPENCLAW_CONFIG_PATH` set to sandbox paths.
+
+### Results
+
+| Check | Result |
+|---|---|
+| Gateway started | PASS |
+| Loopback bind (127.0.0.1:18789) | PASS |
+| HTTP 200 dashboard response | PASS |
+| SIGTERM clean shutdown (73ms) | PASS |
+| No process after stop | PASS |
+| No listener after stop | PASS |
+| No LaunchAgent created | PASS |
+
+### Hidden behaviors observed (not failures — expected defaults)
+
+These loaded automatically without being explicitly requested:
+
+- **Bonjour/mDNS**: gateway advertised itself on the LAN as `_openclaw-gw._tcp.local` — LAN-visible even in loopback bind mode
+- **Browser sidecar**: `browser/server` started on `127.0.0.1:18791` with an auto-generated auth token
+- **Plugins loaded**: bonjour, browser, canvas, device-pair, file-transfer, memory-core, phone-control, talk-voice (8 total)
+- **Default model**: `openai/gpt-5.5` — no provider auth configured, so non-functional, but loaded
+- **Prior state conflict**: Bonjour resolved a name conflict with existing `~/.openclaw` state — confirms prior session on this machine
+
+### Assessment
+
+The test proved OpenClaw can run. It did not prove it is safe to leave active.
+
+**OpenClaw starts too much by default.** The runtime is viable; the default plugin surface is not acceptable for unsupervised use.
+
+**Current status: validated sandbox runtime, not trusted active agent.**
+
+### Required safety work before real use
+
+1. Disable or suppress Bonjour/mDNS advertisement
+2. Disable browser, phone-control, file-transfer, device-pair plugins
+3. Replace `openai/gpt-5.5` default with a local Ollama-compatible path
+4. Run with auth enabled or through a controlled local client only
+5. Keep foreground-only until the above controls are proven
+
+### Next milestone: minimal OpenClaw profile
+
+Target configuration:
+- loopback only
+- no Bonjour/mDNS
+- no browser sidecar
+- no phone/file-transfer/device-pair plugins
+- local model only (Ollama)
+- no channels
+- no daemon
+- auth enabled
+
+Do not use OpenClaw for any real task until this profile is defined and validated.
