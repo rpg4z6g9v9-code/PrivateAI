@@ -120,9 +120,4 @@ The contract is currently implemented via two functions in `services/aiRouter.ts
 - `buildRuntimeContext()` — injects route, date, capabilities, and tool status
 - `buildSystemPrompt()` / `buildLocalSystemPrompt()` — assembles full prompt with contract rules
 
-**Known gaps (to fix):**
-- Personality framing ("You are trustworthy, honest, and direct") should be replaced with Rules 1–3 from Section 5 and Rule 6 from Section 4.
-- The line "Keep responses concise and clear" in `buildSystemPrompt` is redundant with Section 1 and should be removed once response mode is always present.
-- `buildRuntimeContext` advisory tone ("When asked what you can do, answer from the above") should be converted to an explicit rule matching Section 3, Rule 1.
-
-These will be addressed in a subsequent refactor of `aiRouter.ts`.
+**Implementation status:** Complete as of commit 0d58f2b. All gaps resolved.
