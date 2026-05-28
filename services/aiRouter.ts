@@ -26,6 +26,7 @@ interface Capabilities {
   hasImageInput: boolean;
   hasVoiceInput: boolean;
   responseMode: ResponseMode;
+  selectedModel: string;
 }
 
 async function resolveCapabilities(): Promise<Capabilities> {
@@ -39,7 +40,8 @@ async function resolveCapabilities(): Promise<Capabilities> {
     }
   }
   const responseMode = await getResponseMode();
-  return { webSearch, hasImageInput: true, hasVoiceInput: true, responseMode };
+  const selectedModel = await getSelectedModel();
+  return { webSearch, hasImageInput: true, hasVoiceInput: true, responseMode, selectedModel };
 }
 
 // ── System Prompts ──────────────────────────────────────────
@@ -61,7 +63,7 @@ function currentDate(): string {
  */
 function buildRuntimeContext(route: 'local' | 'cloud', capabilities: Capabilities): string {
   const routeLabel = route === 'local'
-    ? 'local (phi4-mini via Ollama on private node)'
+    ? `local (${capabilities.selectedModel} via Ollama on private node)`
     : 'cloud (Claude API)';
 
   const inputs: string[] = ['persistent conversation memory'];
