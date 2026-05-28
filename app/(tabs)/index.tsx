@@ -132,6 +132,7 @@ export default function ChatScreen() {
   const [isCheckingNode, setIsCheckingNode] = useState(false);
   const [routeLabel, setRouteLabel] = useState('');  // 'node' | 'cloud' | ''
   const streamingMsgIdRef = useRef<string | null>(null);
+  const sendingRef = useRef(false);
 
   // History modal
   const [showHistory, setShowHistory] = useState(false);
@@ -296,6 +297,7 @@ export default function ChatScreen() {
     Voice.onSpeechError = (_e: SpeechErrorEvent) => {
       clearSilenceTimer();
       setIsRecording(false);
+      inputTextRef.current = '';
     };
 
     return () => {
@@ -318,7 +320,8 @@ export default function ChatScreen() {
   // ── Handle Message Send ────────────────────────────────────────
   const sendMessageWithText = async (text: string) => {
     if (!text.trim()) return;
-    if (isLoading) return; // prevent queuing while a response is in flight
+    if (isLoading || sendingRef.current) return; // prevent queuing while a response is in flight
+    sendingRef.current = true;
 
     // Security check: detect injection
     const injectCheck = checkInjection(text);
@@ -449,10 +452,16 @@ export default function ChatScreen() {
       }
     } catch (e) {
       console.warn('[Chat] Send message error:', e);
+      if (streamingMsgIdRef.current) {
+        const orphanId = streamingMsgIdRef.current;
+        setMessages(prev => prev.filter(m => m.id !== orphanId));
+        streamingMsgIdRef.current = null;
+      }
       Alert.alert('Error', 'Could not send message');
     } finally {
       setIsLoading(false);
       setRouteLabel('');
+      sendingRef.current = false;
     }
   };
 
