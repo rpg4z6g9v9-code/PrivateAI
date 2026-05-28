@@ -398,7 +398,8 @@ export async function generateLocal(
   conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>,
   signal?: AbortSignal,
 ): Promise<string> {
-  const [OLLAMA_HOST, selectedModel] = await Promise.all([getOllamaHost(), getSelectedModel()]);
+  const OLLAMA_HOST = await getOllamaHost();
+  const selectedModel = await getSelectedModel();
 
   const messages: { role: string; content: string }[] = [];
   if (systemPrompt?.trim()) {

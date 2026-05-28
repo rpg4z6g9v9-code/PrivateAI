@@ -265,10 +265,8 @@ async function tryLocalRoute(
   try {
     const start = Date.now();
     const lastMessage = messages[messages.length - 1]?.content ?? '';
-    const [text, selectedModel] = await Promise.all([
-      generateLocal(lastMessage, buildLocalSystemPrompt('local', capabilities, toolContext), onToken, messages, signal),
-      getSelectedModel(),
-    ]);
+    const selectedModel = await getSelectedModel();
+    const text = await generateLocal(lastMessage, buildLocalSystemPrompt('local', capabilities, toolContext), onToken, messages, signal);
     const latency = Date.now() - start;
 
     return {
