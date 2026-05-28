@@ -160,7 +160,7 @@ export default function SystemScreen() {
   const activeModel    = nodeStatus?.online ? selectedModel.replace(/:latest$/, '') : CLOUD_MODEL;
   const latency        = nodeStatus?.latency != null ? `${nodeStatus.latency}ms` : '—';
   const nodeLabel      = nodeStatus == null ? 'checking...' : nodeStatus.online ? 'online' : 'offline';
-  const availableModels = nodeStatus?.models ?? [];
+  const availableModels = (nodeStatus?.models ?? []).filter(m => !m.includes('embed'));
   const modelMissing   = nodeStatus?.online && availableModels.length > 0 && !availableModels.includes(selectedModel);
 
   return (
