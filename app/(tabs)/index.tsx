@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert, Animated, Dimensions, KeyboardAvoidingView, Modal, Platform,
-  Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
+  Pressable, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { useFocusEffect, router } from 'expo-router';
 import * as LocalAuth from 'expo-local-authentication';
@@ -561,6 +561,32 @@ export default function ChatScreen() {
     }
   };
 
+  // ── Export Conversation ────────────────────────────────────────
+  const exportConversation = async () => {
+    if (messages.length === 0) {
+      Alert.alert('Nothing to export', 'Start a conversation first.');
+      return;
+    }
+    const date = new Date().toISOString().slice(0, 10);
+    const lines: string[] = [
+      `# PrivateAI Conversation Export`,
+      `Date: ${date}`,
+      `Messages: ${messages.length}`,
+      '',
+    ];
+    for (const msg of messages) {
+      lines.push('---', '');
+      lines.push(msg.role === 'user' ? '**You:**' : '**Claude:**');
+      lines.push(msg.content, '');
+    }
+    lines.push('---');
+    try {
+      await Share.share({ message: lines.join('\n'), title: 'PrivateAI Conversation' });
+    } catch {
+      // User cancelled or share sheet unavailable — no action needed
+    }
+  };
+
   // ── Handle Image Attachment ────────────────────────────────────
   const pickImage = async () => {
     try {
@@ -651,6 +677,9 @@ export default function ChatScreen() {
               </Text>
             )}
             {safeMode && <View style={styles.safeBadge}><Text style={styles.safeBadgeText}>safe mode</Text></View>}
+            <TouchableOpacity onPress={exportConversation} style={styles.exportBtn}>
+              <Ionicons name="share-outline" size={18} color="#4a9eff" />
+            </TouchableOpacity>
             <TouchableOpacity onPress={openHistory} style={styles.historyBtn}>
               <Text style={styles.historyBtnText}>≡</Text>
             </TouchableOpacity>
@@ -901,6 +930,7 @@ const styles = StyleSheet.create({
   recordingActive: { backgroundColor: 'rgba(255, 68, 68, 0.1)', borderRadius: 20 },
   sendBtn: { padding: 8 },
 
+  exportBtn: { paddingHorizontal: 6, paddingVertical: 4 },
   historyBtn: { paddingHorizontal: 8, paddingVertical: 4 },
   historyBtnText: { fontFamily: FONT, fontSize: 16, color: '#4a9eff' },
 
