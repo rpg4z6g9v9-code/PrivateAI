@@ -31,7 +31,7 @@ import { checkPrivateNode, type PrivateNodeStatus } from '@/services/localAI';
 import {
   initConversationDB, persistMessage, loadConversation, clearConversation,
   createConversation, getLatestConversationId, getConversations, searchConversations,
-  updateConversationTitle, DEFAULT_CONVO_ID, type ConversationSummary,
+  updateConversationTitle, archiveConversation, DEFAULT_CONVO_ID, type ConversationSummary,
 } from '@/services/conversationDB';
 import type { ConversationMessage } from '@/services/claude';
 import { AppState, type AppStateStatus } from 'react-native';
@@ -561,6 +561,35 @@ export default function ChatScreen() {
     }
   };
 
+  // ── Delete Conversation ────────────────────────────────────────
+  const deleteConversation = (conv: ConversationSummary) => {
+    Alert.alert(
+      'Delete conversation',
+      'This conversation will be removed from history.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await archiveConversation(conv.id);
+              if (conv.id === activeConversationId) {
+                const newId = await createConversation();
+                setActiveConversationId(newId);
+                setMessages([]);
+              }
+              const list = await searchConversations(historyQuery);
+              setHistoryList(list);
+            } catch (e) {
+              console.warn('[Delete] archiveConversation failed:', e);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   // ── Export Conversation ────────────────────────────────────────
   const exportConversation = async () => {
     if (messages.length === 0) {
@@ -827,8 +856,18 @@ export default function ChatScreen() {
                       onPress={() => switchToConversation(conv.id)}
                       onLongPress={() => startRename(conv)}
                       delayLongPress={400}>
-                      <Text style={styles.historySnippet} numberOfLines={2}>{label}</Text>
-                      {isActive && <Text style={styles.historyActiveIndicator}>current</Text>}
+                      <View style={styles.historyItemRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.historySnippet} numberOfLines={2}>{label}</Text>
+                          {isActive && <Text style={styles.historyActiveIndicator}>current</Text>}
+                        </View>
+                        <TouchableOpacity
+                          onPress={() => deleteConversation(conv)}
+                          style={styles.historyDeleteBtn}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                          <Ionicons name="trash-outline" size={14} color="#553333" />
+                        </TouchableOpacity>
+                      </View>
                     </TouchableOpacity>
                   );
                 };
@@ -950,8 +989,10 @@ const styles = StyleSheet.create({
   historyGroupLabel: { fontFamily: FONT, fontSize: 10, color: '#556677', letterSpacing: 0.8, textTransform: 'uppercase', paddingTop: 14, paddingBottom: 4, paddingHorizontal: 2 },
   historyItem: { paddingVertical: 12, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: '#1a1a2a' },
   historyItemActive: { backgroundColor: 'rgba(74, 158, 255, 0.08)', borderRadius: 8 },
+  historyItemRow: { flexDirection: 'row', alignItems: 'center' },
   historySnippet: { fontFamily: FONT, fontSize: 13, color: '#c0c0d0', lineHeight: 18 },
   historyActiveIndicator: { fontFamily: FONT, fontSize: 9, color: '#4a9eff', marginTop: 3, letterSpacing: 0.3 },
+  historyDeleteBtn: { paddingLeft: 12, paddingVertical: 4 },
 
   renameOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', paddingHorizontal: 32 },
   renameSheet: { backgroundColor: '#0e1420', borderRadius: 14, padding: 20, gap: 16, borderWidth: 1, borderColor: '#1a2030' },
