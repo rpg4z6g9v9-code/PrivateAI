@@ -22,7 +22,7 @@ import {
   View,
 } from 'react-native';
 import { router } from 'expo-router';
-import { checkPrivateNode, PrivateNodeStatus } from '@/services/localAI';
+import { checkPrivateNode, PrivateNodeStatus, getSelectedModel, setSelectedModel, DEFAULT_LOCAL_MODEL } from '@/services/localAI';
 import { getConversationStats } from '@/services/conversationDB';
 import { initToolDB, getRecentToolCalls, ToolCall } from '@/services/toolDB';
 import {
@@ -33,7 +33,6 @@ import {
 const FONT = 'SpaceMono-Regular';
 const VERSION_TAG = 'stable-websearch-gateway-v2';
 const CLOUD_MODEL = 'claude-sonnet-4-6';
-const LOCAL_MODEL = 'phi4-mini';
 
 type ConvStats = { total: number; lastActive: number | null };
 
@@ -93,6 +92,9 @@ export default function SystemScreen() {
   const [keySaved, setKeySaved]       = useState(false);
   const [webSearchStatus, setWebSearchStatus] = useState<WebSearchStatus>('unavailable');
 
+  // Model selection
+  const [selectedModel, setSelectedModelState] = useState(DEFAULT_LOCAL_MODEL);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     await initToolDB();
@@ -114,6 +116,7 @@ export default function SystemScreen() {
       setKeyDraft(k ? '••••••••' : '');
       setWebSearchStatus(k ? 'configured' : 'unavailable');
     });
+    getSelectedModel().then(setSelectedModelState);
   }, [refresh]);
 
   const doSearch = useCallback(async () => {
@@ -153,10 +156,12 @@ export default function SystemScreen() {
     setWebSearchStatus('unavailable');
   }, []);
 
-  const route     = nodeStatus?.online ? 'local' : 'cloud';
-  const model     = nodeStatus?.online ? LOCAL_MODEL : CLOUD_MODEL;
-  const latency   = nodeStatus?.latency != null ? `${nodeStatus.latency}ms` : '—';
-  const nodeLabel = nodeStatus == null ? 'checking...' : nodeStatus.online ? 'online' : 'offline';
+  const route          = nodeStatus?.online ? 'local' : 'cloud';
+  const activeModel    = nodeStatus?.online ? selectedModel.replace(/:latest$/, '') : CLOUD_MODEL;
+  const latency        = nodeStatus?.latency != null ? `${nodeStatus.latency}ms` : '—';
+  const nodeLabel      = nodeStatus == null ? 'checking...' : nodeStatus.online ? 'online' : 'offline';
+  const availableModels = nodeStatus?.models ?? [];
+  const modelMissing   = nodeStatus?.online && availableModels.length > 0 && !availableModels.includes(selectedModel);
 
   return (
     <KeyboardAvoidingView
@@ -195,7 +200,7 @@ export default function SystemScreen() {
         <Text style={s.sectionLabel}>// system</Text>
         <View style={s.card}>
           <Row label="route"   value={route}      valueColor={nodeStatus?.online ? '#00ff88' : '#4db8ff'} />
-          <Row label="model"   value={model} />
+          <Row label="model"   value={activeModel} valueColor={modelMissing ? '#ff9500' : '#00ff88'} />
           <Row label="node"    value={nodeLabel}   valueColor={nodeStatus?.online ? '#00ff88' : '#ff4444'} />
           <Row label="latency" value={latency} />
           <Row label="host"    value={nodeStatus?.host ?? '—'} />
@@ -291,6 +296,37 @@ export default function SystemScreen() {
         {/* Configuration */}
         <Text style={s.sectionLabel}>// configuration</Text>
         <View style={s.card}>
+          {/* Model picker */}
+          <View style={s.configRow}>
+            <Text style={s.label}>local model</Text>
+            {modelMissing && (
+              <Text style={s.modelWarning}>selected model not available on node — using fallback</Text>
+            )}
+            {availableModels.length === 0 ? (
+              <Text style={[s.value, { color: '#333' }]}>node offline</Text>
+            ) : (
+              <View style={s.modelList}>
+                {availableModels.map(m => {
+                  const isSelected = m === selectedModel;
+                  return (
+                    <TouchableOpacity
+                      key={m}
+                      style={[s.modelItem, isSelected && s.modelItemSelected]}
+                      onPress={async () => {
+                        await setSelectedModel(m);
+                        setSelectedModelState(m);
+                      }}
+                    >
+                      <Text style={[s.modelItemText, isSelected && s.modelItemTextSelected]}>
+                        {m.replace(/:latest$/, '')}
+                      </Text>
+                      {isSelected && <Text style={s.modelItemCheck}>✓</Text>}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+          </View>
           <View style={s.configRow}>
             <Text style={s.label}>brave api key</Text>
             <View style={s.configInputRow}>
@@ -539,6 +575,23 @@ const s = StyleSheet.create({
     borderRadius: 4,
   },
   configClearText: { fontFamily: FONT, fontSize: 11, color: '#662222', letterSpacing: 1 },
+
+  modelWarning: { fontFamily: FONT, fontSize: 10, color: '#ff9500', marginBottom: 6, lineHeight: 15 },
+  modelList: { gap: 4 },
+  modelItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: '#1a1a1a',
+    borderRadius: 4,
+  },
+  modelItemSelected: { borderColor: '#00ff88', backgroundColor: 'rgba(0,255,136,0.04)' },
+  modelItemText:         { fontFamily: FONT, fontSize: 12, color: '#444' },
+  modelItemTextSelected: { color: '#00ff88' },
+  modelItemCheck:        { fontFamily: FONT, fontSize: 11, color: '#00ff88' },
 
   timestamp: {
     fontFamily: FONT,

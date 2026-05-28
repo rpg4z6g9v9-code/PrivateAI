@@ -10,7 +10,7 @@
  */
 
 import { AIRouteParams, AIRouteResult, ConversationMessage, ClaudeAPIRequest, ClaudeAPIResponse } from '@/services/claude';
-import { generateLocal, isModelLoaded } from '@/services/localAI';
+import { generateLocal, isModelLoaded, getSelectedModel } from '@/services/localAI';
 import { getBraveApiKey, getWebSearchStatus, updateWebSearchStatus, type WebSearchStatus } from '@/services/tools/webSearch';
 
 const CLAUDE_API_KEY = process.env.EXPO_PUBLIC_CLAUDE_API_KEY ?? '';
@@ -265,13 +265,16 @@ async function tryLocalRoute(
   try {
     const start = Date.now();
     const lastMessage = messages[messages.length - 1]?.content ?? '';
-    const text = await generateLocal(lastMessage, buildLocalSystemPrompt('local', capabilities, toolContext), onToken, messages, signal);
+    const [text, selectedModel] = await Promise.all([
+      generateLocal(lastMessage, buildLocalSystemPrompt('local', capabilities, toolContext), onToken, messages, signal),
+      getSelectedModel(),
+    ]);
     const latency = Date.now() - start;
 
     return {
       text,
       route: 'local',
-      model: 'phi4-mini',
+      model: selectedModel.replace(/:latest$/, ''), // strip :latest suffix for display
       latency,
     };
   } catch (e) {

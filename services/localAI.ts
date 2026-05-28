@@ -28,6 +28,22 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const OLLAMA_HOST_KEY = 'ollama_host_v1';
 const DEFAULT_OLLAMA_HOST = '192.168.4.52:11434';
 
+const LOCAL_MODEL_KEY = 'local_model_v1';
+export const DEFAULT_LOCAL_MODEL = 'phi4-mini:latest';
+
+export async function getSelectedModel(): Promise<string> {
+  try {
+    const stored = await AsyncStorage.getItem(LOCAL_MODEL_KEY);
+    return stored?.trim() || DEFAULT_LOCAL_MODEL;
+  } catch {
+    return DEFAULT_LOCAL_MODEL;
+  }
+}
+
+export async function setSelectedModel(model: string): Promise<void> {
+  await AsyncStorage.setItem(LOCAL_MODEL_KEY, model.trim());
+}
+
 export async function getOllamaHost(): Promise<string> {
   try {
     const stored = await AsyncStorage.getItem(OLLAMA_HOST_KEY);
@@ -321,6 +337,7 @@ function streamFromOllama(
   messages: { role: string; content: string }[],
   onToken: (token: string) => void,
   signal: AbortSignal,
+  model: string,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -356,7 +373,7 @@ function streamFromOllama(
     xhr.open('POST', `http://${host}/api/chat`);
     xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.send(JSON.stringify({
-      model: 'phi4-mini:latest',
+      model,
       messages,
       stream: true,
       temperature: 0.7,
@@ -381,7 +398,7 @@ export async function generateLocal(
   conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>,
   signal?: AbortSignal,
 ): Promise<string> {
-  const OLLAMA_HOST = await getOllamaHost();
+  const [OLLAMA_HOST, selectedModel] = await Promise.all([getOllamaHost(), getSelectedModel()]);
 
   const messages: { role: string; content: string }[] = [];
   if (systemPrompt?.trim()) {
@@ -413,7 +430,7 @@ export async function generateLocal(
   try {
     if (onToken) {
       // Streaming path — XHR delivers NDJSON tokens progressively
-      const text = await streamFromOllama(OLLAMA_HOST, messages, onToken, controller.signal);
+      const text = await streamFromOllama(OLLAMA_HOST, messages, onToken, controller.signal, selectedModel);
       clearTimeout(timer);
       return text;
     }
@@ -424,7 +441,7 @@ export async function generateLocal(
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
       body: JSON.stringify({
-        model: 'phi4-mini:latest',
+        model: selectedModel,
         messages,
         stream: false,
         temperature: 0.7,
