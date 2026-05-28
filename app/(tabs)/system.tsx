@@ -22,7 +22,7 @@ import {
   View,
 } from 'react-native';
 import { router } from 'expo-router';
-import { checkPrivateNode, PrivateNodeStatus, getSelectedModel, setSelectedModel, DEFAULT_LOCAL_MODEL } from '@/services/localAI';
+import { checkPrivateNode, PrivateNodeStatus, getSelectedModel, setSelectedModel, DEFAULT_LOCAL_MODEL, getResponseMode, setResponseMode, DEFAULT_RESPONSE_MODE, type ResponseMode } from '@/services/localAI';
 import { getConversationStats } from '@/services/conversationDB';
 import { initToolDB, getRecentToolCalls, ToolCall } from '@/services/toolDB';
 import {
@@ -95,6 +95,9 @@ export default function SystemScreen() {
   // Model selection
   const [selectedModel, setSelectedModelState] = useState(DEFAULT_LOCAL_MODEL);
 
+  // Response mode
+  const [responseMode, setResponseModeState] = useState<ResponseMode>(DEFAULT_RESPONSE_MODE);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     await initToolDB();
@@ -117,6 +120,7 @@ export default function SystemScreen() {
       setWebSearchStatus(k ? 'configured' : 'unavailable');
     });
     getSelectedModel().then(setSelectedModelState);
+    getResponseMode().then(setResponseModeState);
   }, [refresh]);
 
   const doSearch = useCallback(async () => {
@@ -326,6 +330,32 @@ export default function SystemScreen() {
                 })}
               </View>
             )}
+          </View>
+          {/* Response mode picker */}
+          <View style={s.configRow}>
+            <Text style={s.label}>response mode</Text>
+            <View style={s.modelList}>
+              {(['concise', 'balanced', 'deep'] as ResponseMode[]).map(mode => {
+                const isSelected = mode === responseMode;
+                const desc = mode === 'concise' ? '1–3 sentences' : mode === 'deep' ? 'full detail' : 'default';
+                return (
+                  <TouchableOpacity
+                    key={mode}
+                    style={[s.modelItem, isSelected && s.modelItemSelected]}
+                    onPress={async () => {
+                      await setResponseMode(mode);
+                      setResponseModeState(mode);
+                    }}
+                  >
+                    <Text style={[s.modelItemText, isSelected && s.modelItemTextSelected]}>
+                      {mode}
+                      <Text style={[s.modelItemText, { color: '#333' }]}>  {desc}</Text>
+                    </Text>
+                    {isSelected && <Text style={s.modelItemCheck}>✓</Text>}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
           <View style={s.configRow}>
             <Text style={s.label}>brave api key</Text>

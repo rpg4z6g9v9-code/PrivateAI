@@ -44,6 +44,24 @@ export async function setSelectedModel(model: string): Promise<void> {
   await AsyncStorage.setItem(LOCAL_MODEL_KEY, model.trim());
 }
 
+const RESPONSE_MODE_KEY = 'response_mode_v1';
+export type ResponseMode = 'concise' | 'balanced' | 'deep';
+export const DEFAULT_RESPONSE_MODE: ResponseMode = 'balanced';
+
+export async function getResponseMode(): Promise<ResponseMode> {
+  try {
+    const stored = await AsyncStorage.getItem(RESPONSE_MODE_KEY);
+    if (stored === 'concise' || stored === 'balanced' || stored === 'deep') return stored;
+    return DEFAULT_RESPONSE_MODE;
+  } catch {
+    return DEFAULT_RESPONSE_MODE;
+  }
+}
+
+export async function setResponseMode(mode: ResponseMode): Promise<void> {
+  await AsyncStorage.setItem(RESPONSE_MODE_KEY, mode);
+}
+
 export async function getOllamaHost(): Promise<string> {
   try {
     const stored = await AsyncStorage.getItem(OLLAMA_HOST_KEY);
@@ -416,6 +434,9 @@ export async function generateLocal(
     messages.push({ role: 'user', content: userMessage.trim() });
   }
 
+  // Early check — if external signal already aborted before we even start, propagate immediately
+  if (signal?.aborted) throw new Error('Aborted');
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 90_000);
 
@@ -456,7 +477,10 @@ export async function generateLocal(
     return (json.message?.content ?? '').trim();
   } catch (e) {
     clearTimeout(timer);
-    if (controller.signal.aborted) throw new Error('Aborted');
+    if (controller.signal.aborted) {
+      if (signal?.aborted) throw new Error('Aborted'); // user-cancel — propagate
+      // Internal abort without external cancel (timeout or unknown) — fall to cloud
+    }
     const msg = e instanceof Error ? e.message : String(e);
     console.error('[Ollama] Error:', msg);
     throw new Error('Private inference node unavailable. Check Wi-Fi and Mac Mini/Ollama status.');

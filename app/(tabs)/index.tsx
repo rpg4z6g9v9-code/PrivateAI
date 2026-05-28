@@ -498,6 +498,10 @@ export default function ChatScreen() {
     sendMessageWithText(text);
   };
 
+  const handleExpand = () => {
+    sendMessageRef.current?.('Expand that.');
+  };
+
   // ── New Chat ───────────────────────────────────────────────────
   const handleNewChat = () => {
     Alert.alert('New Chat', 'Start a new conversation? Current session is preserved.', [
@@ -771,6 +775,16 @@ export default function ChatScreen() {
             </View>
           ))}
 
+          {/* Expand button — last assistant message, not loading, not stopped */}
+          {!isLoading && messages[messages.length - 1]?.role === 'assistant' &&
+           !messages[messages.length - 1]?.content?.includes('*[stopped]*') && (
+            <View style={[styles.msgRow, styles.msgAssistant]}>
+              <TouchableOpacity onPress={handleExpand} style={styles.expandBtn}>
+                <Text style={styles.expandBtnText}>expand ↓</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           {isLoading && streamingMsgIdRef.current === null && (
             <View style={[styles.msgRow, styles.msgAssistant]}>
               <View style={[styles.bubble, { backgroundColor: 'rgba(20, 20, 30, 0.6)', borderLeftWidth: 2, borderLeftColor: '#4a9eff' }]}>
@@ -1007,6 +1021,8 @@ const styles = StyleSheet.create({
   stopBtn: { borderWidth: 1, borderColor: '#443333', borderRadius: 8, paddingHorizontal: 20, paddingVertical: 6 },
   stopBtnText: { fontFamily: FONT, fontSize: 11, color: '#cc6666', letterSpacing: 1 },
   exportBtn: { paddingHorizontal: 6, paddingVertical: 4 },
+  expandBtn: { paddingHorizontal: 4, paddingVertical: 4 },
+  expandBtnText: { fontFamily: FONT, fontSize: 10, color: '#2a3a4a', letterSpacing: 1 },
   historyBtn: { paddingHorizontal: 8, paddingVertical: 4 },
   historyBtnText: { fontFamily: FONT, fontSize: 16, color: '#4a9eff' },
 

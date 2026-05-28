@@ -10,7 +10,7 @@
  */
 
 import { AIRouteParams, AIRouteResult, ConversationMessage, ClaudeAPIRequest, ClaudeAPIResponse } from '@/services/claude';
-import { generateLocal, isModelLoaded, getSelectedModel } from '@/services/localAI';
+import { generateLocal, isModelLoaded, getSelectedModel, getResponseMode, type ResponseMode } from '@/services/localAI';
 import { getBraveApiKey, getWebSearchStatus, updateWebSearchStatus, type WebSearchStatus } from '@/services/tools/webSearch';
 
 const CLAUDE_API_KEY = process.env.EXPO_PUBLIC_CLAUDE_API_KEY ?? '';
@@ -25,6 +25,7 @@ interface Capabilities {
   webSearch: WebSearchStatus;
   hasImageInput: boolean;
   hasVoiceInput: boolean;
+  responseMode: ResponseMode;
 }
 
 async function resolveCapabilities(): Promise<Capabilities> {
@@ -37,7 +38,8 @@ async function resolveCapabilities(): Promise<Capabilities> {
       updateWebSearchStatus('configured');
     }
   }
-  return { webSearch, hasImageInput: true, hasVoiceInput: true };
+  const responseMode = await getResponseMode();
+  return { webSearch, hasImageInput: true, hasVoiceInput: true, responseMode };
 }
 
 // ── System Prompts ──────────────────────────────────────────
@@ -100,23 +102,32 @@ Do not reference or speculate about:
 If you don't know something, say so directly. Do not substitute plausible-sounding claims for missing information.`;
 }
 
+function responseModeInstruction(mode: ResponseMode): string {
+  if (mode === 'concise') return 'Be concise. Answer in 1–3 sentences. Skip preamble and caveats.';
+  if (mode === 'deep') return 'Provide a thorough, detailed answer. Include relevant context, examples, and full reasoning.';
+  return ''; // balanced = default behavior, no override needed
+}
+
 function buildSystemPrompt(route: 'local' | 'cloud', capabilities: Capabilities, toolContext?: string): string {
   const toolBlock = toolContext ? `\n\n## Tool results for this turn\n${toolContext}` : '';
+  const modeInstruction = responseModeInstruction(capabilities.responseMode);
+  const modeLine = modeInstruction ? `\n\n${modeInstruction}` : '';
   return `You are Claude, a helpful AI assistant running inside PrivateAI on the user's private device.
 
 You are trustworthy, honest, and direct. You respect the user's privacy and only provide information when asked.
 
 Keep responses concise and clear.
 
-${buildRuntimeContext(route, capabilities)}${toolBlock}`;
+${buildRuntimeContext(route, capabilities)}${modeLine}${toolBlock}`;
 }
 
 // Local (Ollama/phi4-mini) gets a tighter prompt — smaller model responds better to explicit brevity constraints.
 function buildLocalSystemPrompt(route: 'local' | 'cloud', capabilities: Capabilities, toolContext?: string): string {
   const toolBlock = toolContext ? `\n\n## Tool results for this turn\n${toolContext}` : '';
-  return `You are a helpful AI assistant running inside PrivateAI on a private local device.
-Be direct and brief. Answer in 1-3 sentences unless the user asks for more detail.
-For simple questions give simple answers. Do not add unnecessary caveats or preamble.
+  const modeInstruction = responseModeInstruction(capabilities.responseMode);
+  const modeLine = modeInstruction ? `\n${modeInstruction}` : '';
+  const defaultBrief = capabilities.responseMode === 'deep' ? '' : '\nBe direct and brief. Answer in 1-3 sentences unless the user asks for more detail.\nFor simple questions give simple answers. Do not add unnecessary caveats or preamble.';
+  return `You are a helpful AI assistant running inside PrivateAI on a private local device.${defaultBrief}${modeLine}
 
 ${buildRuntimeContext(route, capabilities)}${toolBlock}`;
 }
