@@ -379,6 +379,7 @@ export async function generateLocal(
   systemPrompt?: string,
   onToken?: (token: string) => void,
   conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>,
+  signal?: AbortSignal,
 ): Promise<string> {
   const OLLAMA_HOST = await getOllamaHost();
 
@@ -399,6 +400,15 @@ export async function generateLocal(
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 90_000);
+
+  // Wire external cancel signal to internal controller
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort();
+    } else {
+      signal.addEventListener('abort', () => controller.abort(), { once: true });
+    }
+  }
 
   try {
     if (onToken) {
@@ -428,6 +438,7 @@ export async function generateLocal(
     return (json.message?.content ?? '').trim();
   } catch (e) {
     clearTimeout(timer);
+    if (controller.signal.aborted) throw new Error('Aborted');
     const msg = e instanceof Error ? e.message : String(e);
     console.error('[Ollama] Error:', msg);
     throw new Error('Private inference node unavailable. Check Wi-Fi and Mac Mini/Ollama status.');

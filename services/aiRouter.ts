@@ -124,7 +124,7 @@ ${buildRuntimeContext(route, capabilities)}${toolBlock}`;
 // ── Route Decision ───────────────────────────────────────────
 
 export async function routeAI(params: AIRouteParams): Promise<AIRouteResult> {
-  const { messages, isSensitive, safeMode, nodeOnline, onToken, toolContext } = params;
+  const { messages, isSensitive, safeMode, nodeOnline, onToken, toolContext, signal } = params;
 
   const capabilities = await resolveCapabilities();
 
@@ -135,7 +135,7 @@ export async function routeAI(params: AIRouteParams): Promise<AIRouteResult> {
         'Cannot send sensitive data to cloud. Private node is offline. Reconnect to your local network or remove sensitive content.'
       );
     }
-    const localResult = await tryLocalRoute(messages, capabilities, onToken, toolContext);
+    const localResult = await tryLocalRoute(messages, capabilities, onToken, toolContext, signal);
     if (localResult) return localResult;
     throw new Error(
       'Cannot send sensitive data to cloud. Local AI not available. Enable on-device processing or remove sensitive content.'
@@ -149,7 +149,7 @@ export async function routeAI(params: AIRouteParams): Promise<AIRouteResult> {
         'Cloud features disabled due to security event. Private node is offline — cannot process request.'
       );
     }
-    const localResult = await tryLocalRoute(messages, capabilities, onToken, toolContext);
+    const localResult = await tryLocalRoute(messages, capabilities, onToken, toolContext, signal);
     if (localResult) return localResult;
     throw new Error(
       'Cloud features disabled due to security event. Use local AI or reset the app.'
@@ -162,23 +162,26 @@ export async function routeAI(params: AIRouteParams): Promise<AIRouteResult> {
       console.log('[Router] Private node offline — routing to cloud');
       _lastLoggedNodeOnline = false;
     }
-    return await cloudRoute(messages, capabilities, toolContext);
+    return await cloudRoute(messages, capabilities, toolContext, signal);
   }
 
   if (_lastLoggedNodeOnline !== true) {
     console.log('[Router] Routing: local');
     _lastLoggedNodeOnline = true;
   }
-  const localResult = await tryLocalRoute(messages, capabilities, onToken, toolContext);
+  const localResult = await tryLocalRoute(messages, capabilities, onToken, toolContext, signal);
   if (localResult) return localResult;
 
+  // Do not fall through to cloud if the user canceled
+  if (signal?.aborted) throw new Error('Aborted');
+
   console.log('[Router] Local unavailable — cloud fallback');
-  return await cloudRoute(messages, capabilities, toolContext);
+  return await cloudRoute(messages, capabilities, toolContext, signal);
 }
 
 // ── Cloud Route ──────────────────────────────────────────────
 
-async function cloudRoute(messages: ConversationMessage[], capabilities: Capabilities, toolContext?: string): Promise<AIRouteResult> {
+async function cloudRoute(messages: ConversationMessage[], capabilities: Capabilities, toolContext?: string, signal?: AbortSignal): Promise<AIRouteResult> {
   if (!CLAUDE_API_KEY) {
     throw new Error('Cloud AI unavailable — API key not configured. Check EXPO_PUBLIC_CLAUDE_API_KEY.');
   }
@@ -203,8 +206,10 @@ async function cloudRoute(messages: ConversationMessage[], capabilities: Capabil
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify(payload),
+      signal,
     });
   } catch (e) {
+    if (signal?.aborted) throw new Error('Aborted');
     const msg = e instanceof Error ? e.message : String(e);
     const isNetworkErr = msg.toLowerCase().includes('network') || msg.toLowerCase().includes('fetch') || msg.toLowerCase().includes('failed');
     console.error('[Cloud] Fetch failed:', msg);
@@ -252,6 +257,7 @@ async function tryLocalRoute(
   capabilities: Capabilities,
   onToken?: (token: string) => void,
   toolContext?: string,
+  signal?: AbortSignal,
 ): Promise<AIRouteResult | null> {
   const isLoaded = await isModelLoaded();
   if (!isLoaded) return null;
@@ -259,7 +265,7 @@ async function tryLocalRoute(
   try {
     const start = Date.now();
     const lastMessage = messages[messages.length - 1]?.content ?? '';
-    const text = await generateLocal(lastMessage, buildLocalSystemPrompt('local', capabilities, toolContext), onToken, messages);
+    const text = await generateLocal(lastMessage, buildLocalSystemPrompt('local', capabilities, toolContext), onToken, messages, signal);
     const latency = Date.now() - start;
 
     return {
@@ -269,6 +275,7 @@ async function tryLocalRoute(
       latency,
     };
   } catch (e) {
+    if (signal?.aborted) throw e; // propagate cancel — do not swallow into cloud fallback
     console.error('[Router] Local route degraded:', String(e), e instanceof Error ? e.message : '');
     return null;
   }

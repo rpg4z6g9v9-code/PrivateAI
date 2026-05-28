@@ -133,6 +133,8 @@ export default function ChatScreen() {
   const [routeLabel, setRouteLabel] = useState('');  // 'node' | 'cloud' | ''
   const streamingMsgIdRef = useRef<string | null>(null);
   const sendingRef = useRef(false);
+  const cancelRef = useRef<AbortController | null>(null);
+  const streamingContentRef = useRef('');
 
   // History modal
   const [showHistory, setShowHistory] = useState(false);
@@ -322,6 +324,8 @@ export default function ChatScreen() {
     if (!text.trim()) return;
     if (isLoading || sendingRef.current) return; // prevent queuing while a response is in flight
     sendingRef.current = true;
+    cancelRef.current = new AbortController();
+    streamingContentRef.current = '';
 
     // Security check: detect injection
     const injectCheck = checkInjection(text);
@@ -378,6 +382,7 @@ export default function ChatScreen() {
       setMessages(prev => [...prev, { id: streamingId, role: 'assistant' as const, content: '' }]);
 
       const onToken = (token: string) => {
+        streamingContentRef.current += token;
         setMessages(prev => prev.map(m =>
           m.id === streamingId ? { ...m, content: m.content + token } : m
         ));
@@ -414,6 +419,7 @@ export default function ChatScreen() {
         nodeOnline: freshStatus.online,
         onToken: freshStatus.online ? onToken : undefined,
         toolContext,
+        signal: cancelRef.current!.signal,
       });
 
       streamingMsgIdRef.current = null;
@@ -451,17 +457,34 @@ export default function ChatScreen() {
         });
       }
     } catch (e) {
-      console.warn('[Chat] Send message error:', e);
-      if (streamingMsgIdRef.current) {
-        const orphanId = streamingMsgIdRef.current;
-        setMessages(prev => prev.filter(m => m.id !== orphanId));
+      const wasCanceled = cancelRef.current?.signal.aborted === true;
+      if (wasCanceled && streamingMsgIdRef.current) {
+        // Keep partial text — mark as stopped
+        const partialId = streamingMsgIdRef.current;
+        const markedContent = (streamingContentRef.current || '') + '\n\n*[stopped]*';
+        setMessages(prev => prev.map(m =>
+          m.id === partialId ? { ...m, content: markedContent } : m
+        ));
+        persistMessage(
+          { id: partialId, role: 'assistant', content: markedContent, routedVia: null, latency: null, model: null },
+          activeConversationId
+        ).catch(() => {});
         streamingMsgIdRef.current = null;
+      } else if (!wasCanceled) {
+        console.warn('[Chat] Send message error:', e);
+        if (streamingMsgIdRef.current) {
+          const orphanId = streamingMsgIdRef.current;
+          setMessages(prev => prev.filter(m => m.id !== orphanId));
+          streamingMsgIdRef.current = null;
+        }
+        Alert.alert('Error', 'Could not send message');
       }
-      Alert.alert('Error', 'Could not send message');
     } finally {
       setIsLoading(false);
       setRouteLabel('');
       sendingRef.current = false;
+      cancelRef.current = null;
+      streamingContentRef.current = '';
     }
   };
 
@@ -772,6 +795,17 @@ export default function ChatScreen() {
         {/* Knowledge cutoff note */}
         <Text style={styles.cutoffNote}>Knowledge has a training cutoff — may not reflect recent events.</Text>
 
+        {/* Stop button — visible while response is generating */}
+        {isLoading && (
+          <View style={styles.stopRow}>
+            <TouchableOpacity
+              onPress={() => cancelRef.current?.abort()}
+              style={styles.stopBtn}>
+              <Text style={styles.stopBtnText}>■ stop</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Input area */}
         <View style={styles.inputArea}>
           <View style={styles.inputCard}>
@@ -969,6 +1003,9 @@ const styles = StyleSheet.create({
   recordingActive: { backgroundColor: 'rgba(255, 68, 68, 0.1)', borderRadius: 20 },
   sendBtn: { padding: 8 },
 
+  stopRow: { alignItems: 'center', paddingVertical: 6 },
+  stopBtn: { borderWidth: 1, borderColor: '#443333', borderRadius: 8, paddingHorizontal: 20, paddingVertical: 6 },
+  stopBtnText: { fontFamily: FONT, fontSize: 11, color: '#cc6666', letterSpacing: 1 },
   exportBtn: { paddingHorizontal: 6, paddingVertical: 4 },
   historyBtn: { paddingHorizontal: 8, paddingVertical: 4 },
   historyBtnText: { fontFamily: FONT, fontSize: 16, color: '#4a9eff' },

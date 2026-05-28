@@ -51,4 +51,5 @@ export interface AIRouteParams {
   nodeOnline?: boolean;   // pre-checked node status — skip local attempt if false
   onToken?: (token: string) => void; // streaming callback — local route only
   toolContext?: string;  // structured tool results injected for this turn
+  signal?: AbortSignal;  // cancellation — abort() stops stream and prevents cloud fallback
 }
