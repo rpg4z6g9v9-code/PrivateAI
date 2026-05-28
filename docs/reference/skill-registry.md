@@ -42,10 +42,10 @@ Review before any deletion. Not automatic.
 |-------|------|---------|-----------|-------|--------|---------|
 | verify | agent | 2026-05 | 2026-05-28 | Claude | active | Post-change structured review before commit |
 | security-audit | agent | 2026-05 | 2026-05-28 | Claude | active | Security review of diffs and new capabilities |
-| debug | agent | 2026-05 | — | Claude | trial | Structured debugging protocol |
-| test-gen | agent | 2026-05 | — | Claude | trial | Generate test cases from source |
+| debug | agent | 2026-05 | — | Claude | trial | Structured debugging protocol — global (~/.claude/agents/) |
+| test-gen | agent | 2026-05 | — | Claude | trial | Generate test cases from source — global (~/.claude/agents/) |
 | invariant-check | agent | 2026-05 | 2026-05-28 | Claude | active | Deep architectural invariant verification |
-| refactor | agent | 2026-05 | — | Claude | trial | Scoped refactor with blast-radius check |
+| refactor | agent | 2026-05 | — | Claude | trial | Scoped refactor with blast-radius check — global (~/.claude/agents/) |
 | privateai-smoke | agent | 2026-05 | 2026-05-28 | Claude | active | Fast post-change smoke check (8 invariants) |
 | improvement-review | agent | 2026-05-28 | never | Hermes/Claude | trial | Weekly read-only review; produces recommendations only |
 
