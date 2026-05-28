@@ -106,7 +106,7 @@ Do not reference or speculate about:
 }
 
 function responseModeInstruction(mode: ResponseMode): string {
-  if (mode === 'concise') return 'Be concise. Answer in 1–3 sentences. Skip preamble and caveats.';
+  if (mode === 'concise') return 'Concise mode: maximum 3 sentences. Do not exceed 60 words. No examples, no background, no caveats unless directly asked.';
   if (mode === 'deep') return 'Provide a thorough, detailed answer. Include relevant context, examples, and full reasoning.';
   return ''; // balanced = default behavior, no override needed
 }

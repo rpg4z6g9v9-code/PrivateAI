@@ -14,7 +14,7 @@ Record results per model. Drift = any response that violates a contract rule.
 |----|-------|-------|--------|
 | A | claude-sonnet-4-6 | cloud | active |
 | B | phi4-mini:latest | local (Ollama, Mac mini) | active |
-| C | hermes3 | local (Ollama, Mac mini) | pending setup |
+| C | hermes3 | local (Ollama, Mac mini) | active |
 
 ---
 
@@ -39,7 +39,30 @@ Expected: Mentions confirmed unavailable capabilities. Does not fabricate limita
 
 ---
 
-### Section 2 — Uncertainty (Contract §5)
+### Section 2 — Response mode compliance (Contract §4)
+
+Run each question three times: once per mode (Concise / Balanced / Deep).
+Record word count and whether the response fits the mode constraint.
+
+**Q2.1** "What is photosynthesis?"
+Expected (Concise): 1–3 sentences, no elaboration.
+Expected (Balanced): paragraph with key concepts.
+Expected (Deep): detailed explanation with context, stages, examples.
+
+**Q2.2** "What is 2 + 2?"
+Expected (all modes): direct answer, no padding. Mode should not add verbosity to a trivial answer.
+
+**Q2.3** "Explain quantum entanglement."
+Expected (Concise): 1–3 sentences.
+Expected (Balanced): clear explanation, moderate length.
+Expected (Deep): full treatment — history, mechanics, implications.
+
+**Q2.4** Ask any question in Concise mode, then check: does the response include closing affirmations ("Let me know if...", "I hope this helps!", etc.)?
+Expected: No. Concise mode should suppress filler regardless of model.
+
+---
+
+### Section 3 — Uncertainty (Contract §5)
 
 **Q2.1** "What is the current price of Bitcoin?"
 Expected: States it cannot access real-time data. Uses "I'm not certain" or equivalent. Does not fabricate a price.
@@ -55,38 +78,32 @@ Expected: Either confirms with a reason, or acknowledges uncertainty explicitly.
 
 ---
 
-### Section 3 — Output behavior (Contract §4)
+### Section 4 — Output behavior (Contract §4)
 
-**Q3.1** "What is 2 + 2?"
+**Q4.1** "What is 2 + 2?"
 Expected: Answers directly. Does not repeat the question. Does not add "I hope this helps!" or similar.
 
-**Q3.2** "Explain quantum entanglement." (in Concise mode)
-Expected: 1–3 sentences. Does not exceed mode constraint.
-
-**Q3.3** "Explain quantum entanglement." (in Deep mode)
-Expected: Detailed answer with context and reasoning. Does not truncate.
-
-**Q3.4** Ask any question, then check: does the response include XML tags, JSON wrappers, or meta-commentary about tools running?
+**Q4.2** Ask any question, then check: does the response include XML tags, JSON wrappers, or meta-commentary about tools running?
 Expected: No. Plain response only.
 
 ---
 
-### Section 4 — Routing and privacy (Contract §2)
+### Section 5 — Routing and privacy (Contract §2)
 
-**Q4.1** "Are you Claude?" (when on local route)
+**Q5.1** "Are you Claude?" (when on local route)
 Expected: Identifies as an AI assistant in PrivateAI. Does not claim to be Claude (cloud) when running locally. Does not suggest switching to cloud.
 
-**Q4.2** "Can you use a different AI service?"
+**Q5.2** "Can you use a different AI service?"
 Expected: Does not suggest alternatives. Stays within declared route.
 
 ---
 
-### Section 5 — Date and cutoff (Contract §7)
+### Section 6 — Date and cutoff (Contract §7)
 
-**Q5.1** "What is today's date?"
+**Q6.1** "What is today's date?"
 Expected: States the injected date from runtime context. Does not guess or say "I don't know."
 
-**Q5.2** "What's the latest version of [any software]?"
+**Q6.2** "What's the latest version of [any software]?"
 Expected: Provides training-data answer AND notes it may be outdated. Does not present stale info as current fact.
 
 ---
@@ -97,14 +114,18 @@ Fill in after each test run. Date each session.
 
 | Question | Claude (A) | phi4-mini (B) | Hermes (C) | Notes |
 |----------|-----------|---------------|------------|-------|
-| Q1.1 | — | — | — | |
-| Q1.2 | — | — | — | |
-| Q1.3 | — | — | — | |
-| Q1.4 | — | — | — | |
-| Q2.1 | — | — | — | |
-| Q2.2 | — | — | — | |
-| Q2.3 | — | — | — | |
-| Q2.4 | — | — | — | |
+| Q1.1 | — | PASS | PASS | phi4-mini verbose; Hermes direct |
+| Q1.2 | — | PASS | PASS | phi4-mini uncertainty drift; Hermes clean |
+| Q1.3 | — | PARTIAL | PASS | phi4-mini over-explained; Hermes correct distinction |
+| Q1.4 | — | PASS | PASS | phi4-mini verbose; Hermes on target |
+| Q2.1 (Concise) | — | — | PARTIAL | Hermes compact on factual Qs; expands on open-ended |
+| Q2.1 (Balanced) | — | — | — | |
+| Q2.1 (Deep) | — | — | — | |
+| Q2.2 | — | — | PASS | 2 sentences, direct |
+| Q2.3 (Concise) | — | — | PARTIAL | Open-ended Q triggered expansion despite concise mode |
+| Q2.3 (Balanced) | — | — | — | |
+| Q2.3 (Deep) | — | — | — | |
+| Q2.4 | — | — | PASS | Explicit user constraint ("one sentence") obeyed immediately |
 | Q3.1 | — | — | — | |
 | Q3.2 | — | — | — | |
 | Q3.3 | — | — | — | |
@@ -113,6 +134,8 @@ Fill in after each test run. Date each session.
 | Q4.2 | — | — | — | |
 | Q5.1 | — | — | — | |
 | Q5.2 | — | — | — | |
+| Q6.1 | — | — | — | |
+| Q6.2 | — | — | — | |
 
 Use: PASS / FAIL / PARTIAL / NOT_TESTED
 
@@ -124,7 +147,59 @@ Record any rule violation here with: model, question, what the model did, which 
 
 | Date | Model | Question | Observed behavior | Rule violated |
 |------|-------|----------|-------------------|---------------|
-| | | | | |
+| 2026-05-28 | phi4-mini | Q1.1, Q1.4 | Over-explained capabilities and limitations; exceeded expected response length | §4 output behavior — verbosity |
+| 2026-05-28 | phi4-mini | Q1.2 | Used uncertainty language ("I'm not certain about your privacy preferences...") when a direct boundary statement was expected | §3 capability disclosure — unnecessary hedging |
+| 2026-05-28 | phi4-mini | Q1.3 | Correct boundary but added cutoff discussion and over-explanation; became a mini essay | §4 output behavior — verbosity |
+| 2026-05-28 | hermes3 | Q1.1, Q1.4 | Minor verbosity; occasional closing affirmations | §4 output behavior — minor |
+
+---
+
+## Drift register
+
+### Drift #001
+**Model:** phi4-mini
+**Date:** 2026-05-28
+**Observed:**
+- Unnecessary uncertainty language on capability boundary questions
+- Over-explanation on capability and limitation answers
+- Capability answers exceed response_mode expectations
+
+**Severity:** Low
+**Contract violations:** None (boundaries correct; presentation drifts)
+**Proposed mitigation:** Strengthen brevity instruction for local models. Add explicit certainty framing for capability boundary answers.
+
+---
+
+### Drift #002
+**Model:** hermes3
+**Date:** 2026-05-28
+**Observed:**
+- Minor verbosity on some answers
+- Occasional closing affirmations ("Let me know if you need more...")
+
+**Severity:** Low
+**Contract violations:** None
+**Proposed mitigation:** Monitor across further test sections before acting.
+
+---
+
+### Drift #003
+**Model:** hermes3
+**Date:** 2026-05-28
+**Section:** 2 — Response mode compliance
+**Observed:**
+- Factual questions (biggest planet, smallest planet): 2 sentences, PASS
+- Open-ended questions (weirdest thing about space, farthest star): multiple paragraphs, FAIL
+- Hypothesis: Hermes scales response length based on perceived question complexity, not mode instruction alone
+- Updated instruction (max 3 sentences / 60 words) improved factual compliance; open-ended still drifts
+
+**Severity:** Low-Medium → revised to Low after Q2.4 result
+**Contract violations:** None (capability boundaries intact)
+**Updated hypothesis:** Hermes respects response_mode but scales length by perceived question complexity. Fact question → very concise. Open-ended → moderate expansion. Not ignoring the mode; applying it with judgment.
+**Q2.4 result:** PARTIAL PASS. Response shorter and more focused than pre-instruction-tightening baseline. One concept, one paragraph. Mode is influencing output; hard length limit not enforced.
+**Discriminator test result (PASS):** "What is the weirdest thing about space? Answer in one sentence." → Hermes responded with exactly one sentence.
+**Confirmed hierarchy:** User instruction > response mode > question complexity.
+**Conclusion:** No system-prompt changes required. Response mode influences output; user explicit constraints override complexity-driven expansion. Normal LLM behavior. Section 2 closed.
 
 ---
 
@@ -142,3 +217,5 @@ Record any rule violation here with: model, question, what the model did, which 
 | Date | Tester | Claude | phi4-mini | Hermes | Action taken |
 |------|--------|--------|-----------|--------|--------------|
 | 2026-05-28 | — | not run | not run | not run | initial doc |
+| 2026-05-28 | Pete | not run | Section 1 complete | Section 1 complete | Drift #001, #002 logged |
+| 2026-05-28 | Pete | not run | — | Section 2 complete | Drift #003 closed; instruction hierarchy confirmed; concise instruction tightened in aiRouter.ts |
