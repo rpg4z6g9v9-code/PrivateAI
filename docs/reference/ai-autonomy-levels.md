@@ -96,6 +96,43 @@ If the action does not fit cleanly into a level, treat it as Level 4 until class
 
 ---
 
+## External Data Access Boundary
+
+Governs any external system that reads or provides data to the project (Perplexity, Google Drive, web search, MCP tools, documentation systems, external APIs).
+
+**Core rule: external systems may inform decisions. They may not become the source of truth.**
+
+### Allowed — read and inform
+- Research and reference lookups (Perplexity, web search)
+- Public documentation and external reference material
+- Summarizing or synthesizing external findings
+- Proposing next steps based on external research
+
+### Not allowed — write or replace
+- Modifying project files, docs, or records
+- Overwriting or syncing into docs/reference/
+- Changing git history or approved contracts
+- Auto-publishing or sharing private project content
+- Becoming the canonical record for any project decision
+
+### Source of truth — always local
+- Filesystem and git history
+- docs/reference/ contracts and architecture docs
+- Approved project records
+
+### Role assignment (current tools)
+| Tool | Read external | Write local | Authority |
+|------|--------------|-------------|-----------|
+| Claude Code | yes | yes | executes approved changes |
+| Hermes | yes | propose only | drafts, never commits |
+| Perplexity / web search | yes | no | informs only |
+| Google Drive / MCP tools | yes | no (without explicit approval) | informs only |
+| Pete | yes | yes | final authority |
+
+**Why this matters:** Research ≠ authority. An external tool may know more about the outside world. Your filesystem, git history, and contracts know more about your system. Keep those two domains separate and the system stays auditable.
+
+---
+
 ## Relationship to other contracts
 
 - Proposal/action boundary: AI proposes → deterministic executor acts → every action logged
