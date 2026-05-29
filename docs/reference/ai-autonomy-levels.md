@@ -127,9 +127,37 @@ Governs any external system that reads or provides data to the project (Perplexi
 | Hermes | yes | propose only | drafts, never commits |
 | Perplexity / web search | yes | no | informs only |
 | Google Drive / MCP tools | yes | no (without explicit approval) | informs only |
+| OpenClaw | yes (sandbox only) | Level 3 testing only | no production access |
 | Pete | yes | yes | final authority |
 
 **Why this matters:** Research ≠ authority. An external tool may know more about the outside world. Your filesystem, git history, and contracts know more about your system. Keep those two domains separate and the system stays auditable.
+
+---
+
+## Agent Role Assignments
+
+Defines the primary job of each agent. Roles do not overlap — each agent stays in its lane.
+
+| Agent | Primary role | Secondary role | Not for |
+|-------|-------------|----------------|---------|
+| Claude Code | PrivateAI file editing, commits, verification | Architecture planning | Autonomous runtime actions |
+| Hermes | Daily helper — summaries, scripts, planning, local replies | Content drafts | Computer/app control |
+| OpenClaw | Computer control experiments — Level 3 sandbox only | UI automation testing | Email, banking, camera, passwords, admin |
+| Perplexity | External research — read only | Reference lookups | Writing to project files |
+
+### Hermes — daily helper
+Use for: summaries, scripts, checklists, simple planning, local PrivateAI replies, low-cost helper work.
+Does: thinking and helping.
+Does not: edit files, commit code, control apps, access accounts.
+
+### OpenClaw — computer control sandbox
+Use for: Level 3 testing only — app automation, mouse/keyboard control, UI workflow experiments.
+Does not: access email, banking, camera, passwords, or admin accounts.
+Third-party skills: not permitted without explicit review. Security risk confirmed (malicious skills reported in the wild).
+Gate: any OpenClaw action beyond Level 3 requires a formal proposal and approval before implementation.
+
+**PrivateAI building:** Claude Code + Hermes.
+**Computer control experiments:** OpenClaw sandbox only.
 
 ---
 
