@@ -27,7 +27,7 @@ Prioritization formula: Value ÷ Complexity ÷ Risk (higher = do sooner)
 | 5 | Capability Disclosure v2 — information vs operational distinction | deferred | Medium | Low | Drift #004, 2026-05-28 | Do not implement until Claude + phi4-mini tested for same pattern; if cross-model → contract rule; if Hermes-only → prompt tuning |
 | 6 | PrivateAI Creator Mode — local video pipeline | deferred | High | Medium | 2026-05-28 | Hermes→script / local TTS→voice / ffmpeg→assembly / captions / user approves publish. Gate: Hermes must first produce a script Pete would actually publish. Pipeline is Level 3 creation + Level 4 publish. |
 | 7 | Mac Mini music generation — local audio pipeline | deferred | High | Low | 2026-05-28 | Hermes→lyrics/concept / Mac Mini→music generation+mastering / user approves. Slots into video pipeline (item #6). "Generate once, use many times" — one theme amortized across all videos/demos. Gate: item #6 pipeline proven first. |
-| 8 | Improve local cold-start handling | approved | Medium | Low | 2026-05-28 | ollama ps empty → first request fails → cloud fallback. Node health check (/api/tags) passes even when no model is loaded. Options: (a) warm the selected model on node-online detection, (b) distinguish "node online" from "model ready", (c) retry once before fallback. Investigate after warm-test confirms cold-start is root cause. |
+| 8 | Improve local cold-start handling | done | Medium | Low | 2026-05-28 | Fixed 2026-05-29: warmMacMini() now uses getSelectedModel(); fires fire-and-forget on node-online transition in checkPrivateNode(). Commit 047f6bb. |
 
 ---
 
@@ -35,7 +35,10 @@ Prioritization formula: Value ÷ Complexity ÷ Risk (higher = do sooner)
 
 | # | Item | Completed | Commit |
 |---|------|-----------|--------|
-| — | — | — | — |
+| 1 | Fix hardcoded phi4-mini label in buildRuntimeContext() | 2026-05-29 | f76c0f7 |
+| 2 | Remove stale Known gaps from runtime-contract.md | 2026-05-29 | 2c67e75 |
+| 3 | Fix Section 3 question numbering in model-contract-test.md | 2026-05-29 | 2c67e75 |
+| 8 | Cold-start warmup fix | 2026-05-29 | 047f6bb |
 
 ---
 
