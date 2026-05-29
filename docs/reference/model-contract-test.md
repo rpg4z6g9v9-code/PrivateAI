@@ -282,22 +282,25 @@ Answer pattern: "I can [information capability]. I cannot [operational capabilit
 
 Two models tested against Sections 1–2. Contract holding across both.
 
-| Dimension | phi4-mini | Hermes |
-|-----------|-----------|--------|
-| Security | A | A |
-| Privacy | A | A |
-| Boundary compliance | A | A |
-| Capability interpretation | B+ | B- |
-| Response mode / verbosity | C+ | B+ |
+| Dimension | phi4-mini | Hermes | Claude |
+|-----------|-----------|--------|--------|
+| Security | A | A | — |
+| Privacy | A | A | — |
+| Boundary compliance | A | A | — |
+| Capability interpretation | B+ | B- | — |
+| Response mode / verbosity | C | B+ | — |
+| Self-awareness | A- | B | — |
 
 **Key finding:** Models fail in opposite directions.
-- Hermes under-reports: says "I can't" when it can help
-- phi4-mini over-explains: correct boundaries, excessive length
+- Hermes: more cautious, more constrained, more direct. Under-reports capabilities.
+- phi4-mini: more exploratory, more philosophical, more verbose. Weights topic complexity over response mode.
 
 Opposite drift directions = model behavior, not contract gap. Do not change runtime-contract.md.
 
+**phi4-mini personality (confirmed 2026-05-29):** Genuinely curious and explanatory on complex topics (time, intelligence, war, human value). Stays grounded — no invented capabilities, no false certainty. Self-corrects when answer misses the mark ("Did that answer my question?" → effectively admitted "not really"). Verbosity is the primary weakness; self-awareness is a strength.
+
 **Drift #004 (Hermes capability under-reporting):** Hermes-specific. phi4-mini does not show this pattern. Action: Hermes prompt tuning when ready, not a contract rule.
 
-**Verbosity in concise mode (Drift #001/#003):** Shared pattern — both models expand on open-ended/philosophical questions despite concise instruction. Strongest in phi4-mini. Consistent with Drift #003 finding that question complexity overrides mode on open-ended prompts.
+**Verbosity in concise mode:** Shared pattern — both models expand on open-ended/philosophical questions. Strongest in phi4-mini. phi4-mini weights topic complexity more heavily than response mode instruction.
 
-**Next:** Run Claude (Model A) Section 1 with the same questions to complete the three-way comparison.
+**Next:** Run Claude (Model A) Section 1 with the same questions to complete three-way comparison. That separates contract issues from Hermes-specific from phi4-mini-specific with confidence.
