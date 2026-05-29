@@ -148,6 +148,12 @@ export default function ChatScreen() {
   const [renameText, setRenameText] = useState('');
 
 
+  // Summary action
+  const [showSummary, setShowSummary] = useState(false);
+  const [summaryText, setSummaryText] = useState('');
+  const [summaryRoute, setSummaryRoute] = useState<{ via: string; latency: number } | null>(null);
+  const [isSummarizing, setIsSummarizing] = useState(false);
+
   // UI state
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const sidebarX = useRef(new Animated.Value(-200)).current;
@@ -504,6 +510,40 @@ export default function ChatScreen() {
     sendMessageRef.current?.('Expand that.');
   };
 
+  // ── Summarize Conversation ────────────────────────────────────
+  const handleSummarize = async () => {
+    if (isSummarizing || messages.length < 4) return;
+    setIsSummarizing(true);
+    try {
+      const transcript = messages
+        .map(m => {
+          const label = m.role === 'user' ? 'User' : 'Assistant';
+          const content = m.content.length > 500 ? m.content.slice(0, 500) + '…' : m.content;
+          return `${label}: ${content}`;
+        })
+        .join('\n\n');
+
+      const toolContext = `Task: summarize the conversation below.\n\nReturn exactly three sections:\nTopics: (main subjects discussed)\nDecisions: (conclusions reached, or "none")\nNext steps: (open items or follow-ups, or "none")\n\nPlain text only. Each section on its own line. No markdown.\n\nConversation:\n${transcript}`;
+
+      const freshStatus = await checkPrivateNode();
+      const result = await routeAI({
+        messages: [{ role: 'user', content: 'Summarize the conversation.' }],
+        isSensitive: false,
+        safeMode,
+        nodeOnline: freshStatus.online,
+        toolContext,
+      });
+
+      setSummaryText(sanitizeOutput(result.text));
+      setSummaryRoute({ via: result.route, latency: result.latency });
+      setShowSummary(true);
+    } catch (e) {
+      Alert.alert('Summarize failed', 'Could not generate summary.');
+    } finally {
+      setIsSummarizing(false);
+    }
+  };
+
   // ── New Chat ───────────────────────────────────────────────────
   const handleNewChat = () => {
     Alert.alert('New Chat', 'Start a new conversation? Current session is preserved.', [
@@ -789,6 +829,20 @@ export default function ChatScreen() {
             </View>
           )}
 
+          {/* Summarize button — available when conversation has enough content */}
+          {!isLoading && messages.length >= 4 && (
+            <View style={[styles.msgRow, styles.msgAssistant]}>
+              <TouchableOpacity
+                onPress={handleSummarize}
+                disabled={isSummarizing}
+                style={styles.summarizeBtn}>
+                <Text style={styles.summarizeBtnText}>
+                  {isSummarizing ? 'summarizing...' : '∑ summarize'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           {isLoading && streamingMsgIdRef.current === null && (
             <View style={[styles.msgRow, styles.msgAssistant]}>
               <View style={[styles.bubble, { backgroundColor: 'rgba(20, 20, 30, 0.6)', borderLeftWidth: 2, borderLeftColor: '#4a9eff' }]}>
@@ -942,6 +996,32 @@ export default function ChatScreen() {
         </View>
       </Modal>
 
+      {/* Summary Modal */}
+      <Modal
+        visible={showSummary}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowSummary(false)}>
+        <View style={styles.summaryOverlay}>
+          <View style={styles.summarySheet}>
+            <View style={styles.summaryHeader}>
+              <Text style={styles.summaryTitle}>Summary</Text>
+              <TouchableOpacity onPress={() => setShowSummary(false)}>
+                <Text style={styles.summaryClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.summaryScroll} contentContainerStyle={{ paddingBottom: 24 }}>
+              <Text style={styles.summaryText}>{summaryText}</Text>
+              {summaryRoute && (
+                <Text style={styles.summaryRouteBadge}>
+                  {summaryRoute.via === 'local' ? '🖥️ private node' : '☁️  cloud'} · {summaryRoute.latency}ms
+                </Text>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       {/* Rename Modal */}
       <Modal
         visible={showRename}
@@ -1050,6 +1130,17 @@ const styles = StyleSheet.create({
   historySnippet: { fontFamily: FONT, fontSize: 13, color: '#c0c0d0', lineHeight: 18 },
   historyActiveIndicator: { fontFamily: FONT, fontSize: 9, color: '#4a9eff', marginTop: 3, letterSpacing: 0.3 },
   historyDeleteBtn: { paddingLeft: 12, paddingVertical: 4 },
+
+  summarizeBtn: { paddingHorizontal: 10, paddingVertical: 4 },
+  summarizeBtnText: { fontFamily: FONT, fontSize: 10, color: '#2a3a4a', letterSpacing: 1 },
+  summaryOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  summarySheet: { backgroundColor: '#0e1420', borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '70%', paddingBottom: 32 },
+  summaryHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#1a1a2a' },
+  summaryTitle: { fontFamily: FONT, fontSize: 14, fontWeight: '600', color: '#c0c0d0', letterSpacing: 1 },
+  summaryClose: { fontFamily: FONT, fontSize: 16, color: '#888', paddingHorizontal: 4 },
+  summaryScroll: { paddingHorizontal: 20, paddingTop: 16 },
+  summaryText: { fontFamily: FONT, fontSize: 13, color: '#c0c0d0', lineHeight: 20 },
+  summaryRouteBadge: { fontFamily: FONT, fontSize: 9, color: '#6699cc', marginTop: 16, opacity: 0.7 },
 
   renameOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', paddingHorizontal: 32 },
   renameSheet: { backgroundColor: '#0e1420', borderRadius: 14, padding: 20, gap: 16, borderWidth: 1, borderColor: '#1a2030' },
