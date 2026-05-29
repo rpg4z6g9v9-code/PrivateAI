@@ -24,6 +24,7 @@ Prioritization formula: Value ÷ Complexity ÷ Risk (higher = do sooner)
 | 2 | Remove stale "Known gaps" section from runtime-contract.md | approved | Medium | Low | improvement-review 2026-05-28 | All 3 gaps resolved in 0d58f2b; section creates false impression of outstanding debt |
 | 3 | Fix Section 3 question numbering in model-contract-test.md | approved | Medium | Low | improvement-review 2026-05-28 | Questions labeled Q2.1–Q2.4 in Section 3 — copy-paste error from renumber |
 | 4 | Run Claude (Model A) Section 1 baseline | approved | High | None | improvement-review 2026-05-28 | Cloud column entirely blank; contract has no evidence for cloud route |
+| 5 | Capability Disclosure v2 — information vs operational distinction | deferred | Medium | Low | Drift #004, 2026-05-28 | Do not implement until Claude + phi4-mini tested for same pattern; if cross-model → contract rule; if Hermes-only → prompt tuning |
 
 ---
 
