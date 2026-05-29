@@ -5,6 +5,12 @@ Version: 1.0 (2026-05-28)
 Defines what AI agents may do in PrivateAI and under what conditions.
 Use this document to evaluate any proposed AI action before approving it.
 
+**Core principle: the boundary isn't the domain, it's the consequence of being wrong.**
+
+- Low consequence if wrong → Level 3 or below, no approval needed
+- Real consequence if wrong → Level 4, requires approval gate
+- High consequence and autonomous → Level 5, rejected
+
 ---
 
 ## Levels
