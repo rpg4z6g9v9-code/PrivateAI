@@ -437,54 +437,63 @@ export async function generateLocal(
   // Early check — if external signal already aborted before we even start, propagate immediately
   if (signal?.aborted) throw new Error('Aborted');
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 90_000);
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 90_000);
 
-  // Wire external cancel signal to internal controller
-  if (signal) {
-    if (signal.aborted) {
-      controller.abort();
-    } else {
-      signal.addEventListener('abort', () => controller.abort(), { once: true });
+    // Wire external cancel signal to internal controller
+    if (signal) {
+      if (signal.aborted) {
+        controller.abort();
+      } else {
+        signal.addEventListener('abort', () => controller.abort(), { once: true });
+      }
     }
-  }
 
-  try {
-    if (onToken) {
-      // Streaming path — XHR delivers NDJSON tokens progressively
-      const text = await streamFromOllama(OLLAMA_HOST, messages, onToken, controller.signal, selectedModel);
+    try {
+      if (onToken) {
+        // Streaming path — XHR delivers NDJSON tokens progressively
+        const text = await streamFromOllama(OLLAMA_HOST, messages, onToken, controller.signal, selectedModel);
+        clearTimeout(timer);
+        return text;
+      }
+
+      // Non-streaming path (used when no callback provided, e.g. cloud fallback context)
+      const response = await fetch(`http://${OLLAMA_HOST}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: selectedModel,
+          messages,
+          stream: false,
+          temperature: 0.7,
+        }),
+      });
       clearTimeout(timer);
-      return text;
+
+      if (!response.ok) throw new Error(`Ollama error: ${response.status}`);
+
+      const json = await response.json();
+      return (json.message?.content ?? '').trim();
+    } catch (e) {
+      clearTimeout(timer);
+      if (controller.signal.aborted) {
+        if (signal?.aborted) throw new Error('Aborted'); // user-cancel — propagate
+        // Internal abort without external cancel (timeout or unknown) — fall to cloud
+      }
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes('Ollama error: 0') && attempt === 1 && !signal?.aborted) {
+        console.log('[Ollama] status 0 — retrying once after warmup delay');
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        if (signal?.aborted) throw new Error('Aborted');
+        continue;
+      }
+      console.error('[Ollama] Error:', msg);
+      throw new Error('Private inference node unavailable. Check Wi-Fi and Mac Mini/Ollama status.');
     }
-
-    // Non-streaming path (used when no callback provided, e.g. cloud fallback context)
-    const response = await fetch(`http://${OLLAMA_HOST}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: selectedModel,
-        messages,
-        stream: false,
-        temperature: 0.7,
-      }),
-    });
-    clearTimeout(timer);
-
-    if (!response.ok) throw new Error(`Ollama error: ${response.status}`);
-
-    const json = await response.json();
-    return (json.message?.content ?? '').trim();
-  } catch (e) {
-    clearTimeout(timer);
-    if (controller.signal.aborted) {
-      if (signal?.aborted) throw new Error('Aborted'); // user-cancel — propagate
-      // Internal abort without external cancel (timeout or unknown) — fall to cloud
-    }
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error('[Ollama] Error:', msg);
-    throw new Error('Private inference node unavailable. Check Wi-Fi and Mac Mini/Ollama status.');
   }
+  throw new Error('Private inference node unavailable. Check Wi-Fi and Mac Mini/Ollama status.');
 }
 
 // ─── Memory pattern extraction (local) ───────────────────────
