@@ -80,7 +80,7 @@ function buildRuntimeContext(route: 'local' | 'cloud', capabilities: Capabilitie
   }
   // 'unavailable': omit entirely
 
-  return `## Runtime state — canonical
+  return `Runtime state:
 
 The following reflects the actual runtime state of this session. Treat it as authoritative.
 
@@ -147,6 +147,8 @@ function buildLocalSystemPrompt(route: 'local' | 'cloud', capabilities: Capabili
     : '';
   return `You are an AI assistant running inside PrivateAI on a private local device.
 
+${buildRuntimeContext(route, capabilities)}
+
 ## Output rules
 1. Do not repeat the user's question before answering.
 2. Do not add closing affirmations.
@@ -156,9 +158,7 @@ function buildLocalSystemPrompt(route: 'local' | 'cloud', capabilities: Capabili
 
 ## Uncertainty rules
 1. State uncertainty explicitly: "I'm not certain, but..."
-2. "I don't know" is a complete answer. Do not pad it with speculation.
-
-${buildRuntimeContext(route, capabilities)}${modeLine}${toolBlock}`;
+2. "I don't know" is a complete answer. Do not pad it with speculation.${modeLine}${toolBlock}`;
 }
 
 // ── Route Decision ───────────────────────────────────────────
