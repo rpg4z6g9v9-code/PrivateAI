@@ -624,6 +624,8 @@ export async function checkPrivateNode(): Promise<PrivateNodeStatus> {
     if (_lastNodeOnline !== true) {
       console.log(`[PrivateNode] online · ${models.join(', ') || 'no models'} · ${latency}ms`);
       _lastNodeOnline = true;
+      // Warm the selected model on first online detection — fire-and-forget, never blocks routing
+      warmMacMini().catch(() => {});
     }
     return { online: true, host, latency, models };
 
@@ -637,11 +639,12 @@ export async function checkPrivateNode(): Promise<PrivateNodeStatus> {
 }
 
 /**
- * Pre-warm the 70B model on Mac Mini so it's loaded before the user's first message.
+ * Pre-warm the selected model on Mac Mini so it's loaded before the user's first message.
  * Sends a minimal request and discards the response. Fire-and-forget — never throws.
  */
 export async function warmMacMini(): Promise<void> {
   const OLLAMA_HOST = await getOllamaHost();
+  const model = await getSelectedModel();
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 120_000);
@@ -650,7 +653,7 @@ export async function warmMacMini(): Promise<void> {
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
       body: JSON.stringify({
-        model: 'phi4-mini:latest',
+        model,
         messages: [{ role: 'user', content: 'hi' }],
         stream: false,
       }),
