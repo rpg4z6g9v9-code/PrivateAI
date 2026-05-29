@@ -33,6 +33,7 @@ import {
   createConversation, getLatestConversationId, getConversations, searchConversations,
   updateConversationTitle, archiveConversation, DEFAULT_CONVO_ID, type ConversationSummary,
 } from '@/services/conversationDB';
+import { embedUserMessage, semanticSearchConversations } from '@/services/embeddingService';
 import type { ConversationMessage } from '@/services/claude';
 import { AppState, type AppStateStatus } from 'react-native';
 import Constants from 'expo-constants';
@@ -374,6 +375,7 @@ export default function ChatScreen() {
       setMessages(newMessages);
       setAttachment(null);
       persistMessage(userMsg, activeConversationId).catch(e => console.warn('[DB] persist user msg failed:', e));
+      embedUserMessage(userMsg.content, userMsg.id, activeConversationId);
 
       // Streaming placeholder — inserted immediately so the UI shows activity at once.
       // For local route: tokens fill it in real time. For cloud: replaced on completion.
@@ -536,7 +538,9 @@ export default function ChatScreen() {
   const handleHistorySearch = async (q: string) => {
     setHistoryQuery(q);
     try {
-      const list = await searchConversations(q);
+      // Try semantic search first; fall back to SQL LIKE if offline or no embeddings
+      const semantic = q.trim() ? await semanticSearchConversations(q) : null;
+      const list = semantic ?? await searchConversations(q);
       setHistoryList(list);
     } catch (e) {
       console.warn('[DB] searchConversations failed:', e);

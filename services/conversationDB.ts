@@ -84,6 +84,19 @@ export async function initConversationDB(): Promise<void> {
     // Column already exists — expected on all runs after the first
   }
 
+  // Migration: semantic embedding store (idempotent)
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS message_embeddings (
+      message_id      TEXT PRIMARY KEY,
+      conversation_id TEXT    NOT NULL,
+      embedding       TEXT    NOT NULL,
+      embedded_at     INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_embeddings_conv
+      ON message_embeddings(conversation_id);
+  `);
+
   // Ensure the default conversation row exists
   await db.runAsync(
     'INSERT OR IGNORE INTO conversations (id, created_at) VALUES (?, ?)',
@@ -279,4 +292,34 @@ export async function loadConversation(conversationId: string): Promise<Persiste
      ORDER BY timestamp ASC`,
     [conversationId]
   );
+}
+
+// ── Embeddings ────────────────────────────────────────────────
+
+export async function storeEmbedding(
+  messageId: string,
+  conversationId: string,
+  embedding: number[],
+): Promise<void> {
+  if (!db) return;
+  await db.runAsync(
+    `INSERT OR REPLACE INTO message_embeddings
+       (message_id, conversation_id, embedding, embedded_at)
+     VALUES (?, ?, ?, ?)`,
+    [messageId, conversationId, JSON.stringify(embedding), Date.now()]
+  );
+}
+
+export async function getAllEmbeddings(): Promise<
+  { messageId: string; conversationId: string; embedding: number[] }[]
+> {
+  if (!db) return [];
+  const rows = await db.getAllAsync<{ message_id: string; conversation_id: string; embedding: string }>(
+    'SELECT message_id, conversation_id, embedding FROM message_embeddings'
+  );
+  return rows.map(r => ({
+    messageId: r.message_id,
+    conversationId: r.conversation_id,
+    embedding: JSON.parse(r.embedding) as number[],
+  }));
 }
