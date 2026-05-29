@@ -66,6 +66,12 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 /**
  * Embed a user message and store it. Fire-and-forget — never throws.
  * Called after persistMessage() on the send path.
+ *
+ * Embedding rule: only user-visible chat messages are embedded.
+ * Never embed: system prompts, tool context, routing metadata,
+ * assistant messages, or any internal/hidden content.
+ * All embedding is local — nomic-embed-text on Mac Mini only.
+ * No cloud call is ever made for embeddings.
  */
 export function embedUserMessage(
   content: string,
