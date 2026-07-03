@@ -76,6 +76,8 @@ const SEARCH_PATTERNS = [
   /\b(latest|current|recent) (news|updates?|events?|prices?|weather|info)\b/i,
   /\bwhat (is|are) (happening|going on)\b/i,
   /^web:\s/i,   // explicit prefix: "web: ..."
+  /\bwhat.s (the )?(weather|temperature|forecast)\b/i,
+  /\b(weather|forecast) (in|for|at)\b/i,
 ];
 
 /** Returns query string if message contains search intent, null otherwise. */
@@ -551,10 +553,20 @@ export default function ChatScreen() {
       {
         text: 'New Chat',
         onPress: async () => {
+          console.log('[History] New Conversation pressed');
           try {
             const newId = await createConversation();
             setActiveConversationId(newId);
             setMessages([]);
+            // Prepend a synthetic entry so the new empty conversation is immediately
+            // visible in the history sheet. getConversations() filters out message-less
+            // conversations, so without this it would only appear after the first message.
+            const now = Date.now();
+            setHistoryList(prev => [
+              { id: newId, title: 'New Conversation', snippet: null, createdAt: now, lastActive: now, archived: 0 },
+              ...prev.filter(c => c.id !== newId),
+            ]);
+            console.log('[History] synthetic new conversation prepended', newId);
           } catch (e) {
             console.warn('[DB] createConversation failed:', e);
           }
@@ -567,7 +579,18 @@ export default function ChatScreen() {
   const openHistory = async () => {
     try {
       setHistoryQuery('');
-      const list = await getConversations();
+      let list = await getConversations();
+      console.log('[History] openHistory — DB returned', list.length, 'conversations, activeId:', activeConversationId);
+      // If the active conversation isn't in the DB list (new/empty — no messages yet),
+      // prepend a synthetic entry so it's immediately visible at the top.
+      if (!list.some(c => c.id === activeConversationId)) {
+        console.log('[History] active conversation not in DB list — injecting synthetic entry');
+        const now = Date.now();
+        list = [
+          { id: activeConversationId, title: 'New Conversation', snippet: null, createdAt: now, lastActive: now, archived: 0 },
+          ...list,
+        ];
+      }
       setHistoryList(list);
       setShowHistory(true);
     } catch (e) {
@@ -936,9 +959,9 @@ export default function ChatScreen() {
             </View>
             <View style={styles.historySearchRow}>
               <TextInput
-                style={styles.historySearch}
+                style={[styles.historySearch, { color: '#ffffff' }]}
                 placeholder="Search conversations..."
-                placeholderTextColor="#444"
+                placeholderTextColor="#7f8aa3"
                 value={historyQuery}
                 onChangeText={handleHistorySearch}
                 autoCapitalize="none"

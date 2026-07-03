@@ -58,7 +58,7 @@ function ToolEntry({ call }: { call: ToolCall }) {
   return (
     <View style={s.toolEntry}>
       <Text style={s.toolName}>{call.tool_name}</Text>
-      <Text style={s.toolDetail}>→ {call.input_summary}</Text>
+      <Text style={s.toolDetail}>→ {call.input_summary.length > 80 ? call.input_summary.slice(0, 80) + '…' : call.input_summary}</Text>
       <Text style={[s.toolDetail, { color: statusColor }]}>→ {call.status}</Text>
       {call.duration_ms != null && (
         <Text style={s.toolDetail}>→ {call.duration_ms}ms</Text>
@@ -117,7 +117,8 @@ export default function SystemScreen() {
     refresh();
     getBraveApiKey().then(k => {
       setKeyDraft(k ? '••••••••' : '');
-      setWebSearchStatus(k ? 'configured' : 'unavailable');
+      const live = getWebSearchStatus();
+      setWebSearchStatus(live !== 'unavailable' ? live : k ? 'configured' : 'unavailable');
     });
     getSelectedModel().then(setSelectedModelState);
     getResponseMode().then(setResponseModeState);
