@@ -26,7 +26,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // Persisted so the user can change it in Settings without a rebuild.
 
 const OLLAMA_HOST_KEY = 'ollama_host_v1';
-const DEFAULT_OLLAMA_HOST = '192.168.4.52:11434';
+export const DEFAULT_OLLAMA_HOST = '192.168.4.52:11434';
 
 const LOCAL_MODEL_KEY = 'local_model_v1';
 export const DEFAULT_LOCAL_MODEL = 'phi4-mini:latest';
@@ -65,11 +65,7 @@ export async function setResponseMode(mode: ResponseMode): Promise<void> {
 export async function getOllamaHost(): Promise<string> {
   try {
     const stored = await AsyncStorage.getItem(OLLAMA_HOST_KEY);
-    if (stored && stored.trim() !== DEFAULT_OLLAMA_HOST) {
-      // Clear stale host — always use DEFAULT_OLLAMA_HOST
-      await AsyncStorage.removeItem(OLLAMA_HOST_KEY);
-    }
-    return DEFAULT_OLLAMA_HOST;
+    return stored?.trim() || DEFAULT_OLLAMA_HOST;
   } catch {
     return DEFAULT_OLLAMA_HOST;
   }
@@ -608,13 +604,14 @@ export type PrivateNodeStatus = {
  */
 export async function checkPrivateNode(): Promise<PrivateNodeStatus> {
   const host = await getOllamaHost();
+  const url = `http://${host}/api/tags`;
   const start = Date.now();
 
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5_000);
 
-    const res = await fetch(`http://${host}/api/tags`, { signal: controller.signal });
+    const res = await fetch(url, { signal: controller.signal });
     clearTimeout(timeout);
 
     const latency = Date.now() - start;
@@ -638,7 +635,12 @@ export async function checkPrivateNode(): Promise<PrivateNodeStatus> {
     }
     return { online: true, host, latency, models };
 
-  } catch (e) {
+  } catch {
+    // A "Network request failed" TypeError with no HTTP status (as opposed to
+    // an AbortError, which means our own 5s timeout fired) can indicate iOS
+    // ATS silently blocking cleartext HTTP to a non-exempt host, not just a
+    // genuinely unreachable node — see app.json infoPlist if this needs
+    // revisiting (no ATS exception is currently configured).
     if (_lastNodeOnline !== false) {
       console.log(`[PrivateNode] offline · check Wi-Fi or Ollama status`);
       _lastNodeOnline = false;

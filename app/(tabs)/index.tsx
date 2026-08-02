@@ -19,13 +19,16 @@ import Voice, { SpeechResultsEvent, SpeechErrorEvent } from '@react-native-voice
 import { Ionicons } from '@expo/vector-icons';
 import * as Speech from 'expo-speech';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystemLegacy from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import CognitiveBackground from '@/components/chat/CognitiveBackground';
+import PdfExtractorWebView, { type PdfExtractorHandle } from '@/components/PdfExtractorWebView';
 import { networkMonitor } from '@/services/networkMonitor';
 import { checkInjection, sanitizeOutput, classifyData, logSecurityEvent } from '@/services/securityGateway';
 import { canAccessVault, unlockVault, lockVault } from '@/services/dataVault';
-import { routeAI } from '@/services/aiRouter';
+import { routeAI, routeTeamMode } from '@/services/aiRouter';
 import { webSearch, type SearchResult } from '@/services/tools/webSearch';
 import { checkPrivateNode, type PrivateNodeStatus } from '@/services/localAI';
 import {
@@ -33,7 +36,9 @@ import {
   createConversation, getLatestConversationId, getConversations, searchConversations,
   updateConversationTitle, archiveConversation, DEFAULT_CONVO_ID, type ConversationSummary,
 } from '@/services/conversationDB';
-import { embedUserMessage, semanticSearchConversations } from '@/services/embeddingService';
+import { embedUserMessage, semanticSearchConversations, embedText } from '@/services/embeddingService';
+import { findRelevantNodes } from '@/services/embeddings';
+import { parseFileToNode, setGraphNodes, getGraphNodes, setLastContextNodes } from '@/services/graphNodes';
 import type { ConversationMessage } from '@/services/claude';
 import { AppState, type AppStateStatus } from 'react-native';
 import Constants from 'expo-constants';
@@ -47,6 +52,7 @@ interface Message {
   routedVia?: 'local' | 'cloud' | 'quick_reply';
   model?: string;
   latency?: number;
+  matchedNodeIds?: string[]; // graph node ids this turn's retrieval drew on — metadata only, not rendered in the bubble
 }
 
 interface AttachmentImage {
@@ -119,10 +125,17 @@ export default function ChatScreen() {
 
   // Voice state
   const [isRecording, setIsRecording] = useState(false);
+  const [isImportingFiles, setIsImportingFiles] = useState(false);
+  const [hasGraphNodes, setHasGraphNodes] = useState(false);
+  const pdfExtractorRef = useRef<PdfExtractorHandle>(null);
   const voiceDoneRef = useRef(false);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputTextRef = useRef('');
   const sendMessageRef = useRef<(text: string) => void>(() => {});
+
+  // Team mode state
+  const [teamMode, setTeamMode] = useState(false);
+  const TEAM_MODE_KEY = 'teamMode_v2';
 
   // Auth & security
   const [authLocked, setAuthLocked] = useState(true);
@@ -159,6 +172,10 @@ export default function ChatScreen() {
   // UI state
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const sidebarX = useRef(new Animated.Value(-200)).current;
+
+  // Input bar action icons — collapsed behind a `+` toggle
+  const [actionsExpanded, setActionsExpanded] = useState(false);
+  const actionsAnim = useRef(new Animated.Value(0)).current;
 
   // Dismiss history modal when navigating away from this screen
   useFocusEffect(
@@ -221,6 +238,9 @@ export default function ChatScreen() {
       try {
         await initConversationDB();
         const convoId = await getLatestConversationId();
+        // Load persisted team mode preference
+        const savedTeamMode = await AsyncStorage.getItem(TEAM_MODE_KEY);
+        if (savedTeamMode === 'true') setTeamMode(true);
         setActiveConversationId(convoId);
         const rows = await loadConversation(convoId);
         if (rows.length > 0) {
@@ -239,6 +259,8 @@ export default function ChatScreen() {
         setIsRestoring(false);
       }
     })();
+
+    getGraphNodes().then(nodes => setHasGraphNodes(nodes.length > 0)).catch(() => {});
   }, []);
 
   // ── Loading dots animation ─────────────────────────────────────
@@ -311,9 +333,18 @@ export default function ChatScreen() {
       inputTextRef.current = '';
     };
 
+    // Reset any leftover native listener state from onboarding or a prior session.
+    // Voice.start() only registers native listeners when _listeners is null, so without
+    // this destroy() the first start() call would silently skip registration and fire
+    // into stale (or no-op) handlers instead of the ones set above.
+    Voice.destroy().catch(() => {});
+
     return () => {
       clearSilenceTimer();
-      Voice.removeAllListeners();
+      // destroy() removes native emitter subscriptions and resets _listeners to null.
+      // removeAllListeners() only clears _events but leaves native subscriptions active,
+      // so it is not sufficient for cleanup.
+      Voice.destroy().catch(() => {});
     };
   }, []);
 
@@ -385,11 +416,18 @@ export default function ChatScreen() {
       persistMessage(userMsg, activeConversationId).catch(e => console.warn('[DB] persist user msg failed:', e));
       embedUserMessage(userMsg.content, userMsg.id, activeConversationId);
 
+      // Semantic retrieval over uploaded notes — runs in parallel with the AI
+      // call below so it never adds latency to the visible response. Best-effort:
+      // an unreachable Ollama host or no embedded notes just resolves to [].
+      const retrievalPromise = findRelevantNodes(text).catch(() => [] as string[]);
+
       // Streaming placeholder — inserted immediately so the UI shows activity at once.
       // For local route: tokens fill it in real time. For cloud: replaced on completion.
+      // Empty-bubble fix: team mode takes longer (classify + worker + synthesize) so we
+      // show '...' instead of an empty string to avoid a visibly blank bubble.
       const streamingId = `${Date.now()}_assistant`;
       streamingMsgIdRef.current = streamingId;
-      setMessages(prev => [...prev, { id: streamingId, role: 'assistant' as const, content: '' }]);
+      setMessages(prev => [...prev, { id: streamingId, role: 'assistant' as const, content: teamMode ? '...' : '' }]);
 
       const onToken = (token: string) => {
         streamingContentRef.current += token;
@@ -418,8 +456,8 @@ export default function ChatScreen() {
         }
       }
 
-      // Route to AI (cloud or local, respecting security constraints)
-      const result = await routeAI({
+      // Route to AI — team mode uses manager/worker pipeline, otherwise standard routing
+      const routeParams = {
         messages: newMessages.map(m => ({
           role: m.role,
           content: m.content,
@@ -430,7 +468,8 @@ export default function ChatScreen() {
         onToken: freshStatus.online ? onToken : undefined,
         toolContext,
         signal: cancelRef.current!.signal,
-      });
+      };
+      const result = await (teamMode ? routeTeamMode(routeParams) : routeAI(routeParams));
 
       streamingMsgIdRef.current = null;
       const reply = sanitizeOutput(result.text);
@@ -444,6 +483,12 @@ export default function ChatScreen() {
         safety: injectCheck.detected ? 'blocked' : 'safe',
       });
 
+      // Which uploaded notes (if any) this turn's question matched — metadata
+      // only, never rendered in the bubble. Persisted so app/graph.tsx can
+      // highlight them next time it's opened.
+      const matchedNodeIds = await retrievalPromise;
+      setLastContextNodes(matchedNodeIds).catch(() => {});
+
       const assistantMsg: Message = {
         id: streamingId,
         role: 'assistant',
@@ -451,6 +496,7 @@ export default function ChatScreen() {
         routedVia: result.route,
         model: result.model,
         latency: result.latency,
+        matchedNodeIds,
       };
 
       // Replace streaming placeholder with final message (sanitized + route metadata)
@@ -735,6 +781,93 @@ export default function ChatScreen() {
     }
   };
 
+  // ── Handle Knowledge Graph File Import ─────────────────────────
+  /** Extracts text for a single picked asset. PDFs go through the hidden pdf.js
+   * WebView; failures/timeouts there resolve to '' rather than throwing, so a
+   * scanned/image-only PDF still yields a filename-only node instead of
+   * blocking the whole import. */
+  const readAssetContent = async (asset: DocumentPicker.DocumentPickerAsset): Promise<string> => {
+    if (/\.pdf$/i.test(asset.name)) {
+      try {
+        const base64 = await FileSystemLegacy.readAsStringAsync(asset.uri, {
+          encoding: FileSystemLegacy.EncodingType.Base64,
+        });
+        return await pdfExtractorRef.current?.extractText(base64) ?? '';
+      } catch (e) {
+        console.warn('[Graph] PDF extraction failed, falling back to filename-only:', e);
+        return '';
+      }
+    }
+    return FileSystemLegacy.readAsStringAsync(asset.uri);
+  };
+
+  const pickGraphFiles = async () => {
+    if (isImportingFiles) return;
+    try {
+      setIsImportingFiles(true);
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['text/plain', 'text/markdown', 'application/pdf'],
+        multiple: true,
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled || !result.assets?.length) return;
+
+      // MIME type reporting (especially for .md) is inconsistent across platforms —
+      // filter by extension as the source of truth instead of trusting the picker's type filter.
+      const validAssets = result.assets.filter(a => /\.(md|txt|pdf)$/i.test(a.name));
+      if (validAssets.length === 0) {
+        Alert.alert('No files added', 'Only .md, .txt, and .pdf files are supported.');
+        return;
+      }
+
+      const newNodes = await Promise.all(
+        validAssets.map(async asset => {
+          const content = await readAssetContent(asset);
+          // id = filename, so re-uploading the same file overwrites its old node
+          // (via the dedupe below) instead of appending a duplicate.
+          const node = parseFileToNode(asset.name, content, asset.name);
+          // Embed once, at upload time — not on every graph render. Best-effort:
+          // an unreachable Ollama host just leaves this node without an
+          // embedding, so it's silently skipped by retrieval later.
+          const embedding = await embedText(node.p);
+          return embedding ? { ...node, embedding } : node;
+        })
+      );
+
+      // Merge into whatever's already stored rather than replacing it —
+      // newly uploaded nodes win on id collision (same filename re-uploaded).
+      const existingNodes = await getGraphNodes();
+      const merged = new Map(existingNodes.map(n => [n.id, n] as const));
+      for (const node of newNodes) merged.set(node.id, node);
+
+      await setGraphNodes(Array.from(merged.values()));
+      setHasGraphNodes(true);
+      router.push('/graph' as any);
+    } catch (e) {
+      console.warn('[Graph] pick files failed:', e);
+      Alert.alert('Error', 'Could not read selected file(s)');
+    } finally {
+      setIsImportingFiles(false);
+    }
+  };
+
+  // ── Open Last Uploaded Graph ────────────────────────────────────
+  const openLastGraph = () => {
+    if (!hasGraphNodes) return;
+    router.push('/graph' as any);
+  };
+
+  // ── Toggle Input Bar Action Icons ──────────────────────────────
+  const toggleActions = () => {
+    if (actionsExpanded) {
+      Animated.timing(actionsAnim, { toValue: 0, duration: 150, useNativeDriver: true })
+        .start(() => setActionsExpanded(false));
+    } else {
+      setActionsExpanded(true);
+      Animated.timing(actionsAnim, { toValue: 1, duration: 180, useNativeDriver: true }).start();
+    }
+  };
+
   // ── Conversation grouping helper ──────────────────────────────
   const groupConversations = (list: ConversationSummary[]) => {
     const now = Date.now();
@@ -777,6 +910,7 @@ export default function ChatScreen() {
   return (
     <View style={[styles.root, { backgroundColor: '#080d14' }]}>
       <CognitiveBackground isSpeaking={isSpeaking} />
+      <PdfExtractorWebView ref={pdfExtractorRef} />
 
       <KeyboardAvoidingView
         style={styles.container}
@@ -788,15 +922,28 @@ export default function ChatScreen() {
           <TouchableOpacity onPress={handleNewChat} style={styles.newChatBtn}>
             <Text style={styles.newChatText}>+ new</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Claude</Text>
+          <Text style={styles.headerTitle}>{teamMode ? 'Adam' : 'Claude'}</Text>
           <View style={styles.headerRight}>
-            {isCheckingNode ? (
+            <TouchableOpacity
+              onPress={() => {
+                const next = !teamMode;
+                setTeamMode(next);
+                AsyncStorage.setItem(TEAM_MODE_KEY, next ? 'true' : 'false').catch(() => {});
+              }}
+              style={[styles.teamModeBtn, teamMode && styles.teamModeBtnActive]}>
+              <Text style={[styles.teamModeBtnText, teamMode && styles.teamModeBtnTextActive]}>
+                {teamMode ? '⬡ team' : '⬡'}
+              </Text>
+            </TouchableOpacity>
+            {teamMode ? (
+              <Text style={[styles.nodeBadge, { color: '#4a9eff' }]}>☁️ cloud</Text>
+            ) : isCheckingNode ? (
               <Text style={[styles.nodeBadge, { color: '#888888' }]}>checking node...</Text>
             ) : nodeStatus !== null && (
               <Text style={[styles.nodeBadge, { color: nodeStatus.online ? '#44cc88' : '#cc4444' }]}>
                 {nodeStatus.online
                   ? `● node · ${nodeStatus.latency}ms`
-                  : '● offline · cloud only'}
+                  : '● node offline'}
               </Text>
             )}
             {safeMode && <View style={styles.safeBadge}><Text style={styles.safeBadgeText}>safe mode</Text></View>}
@@ -835,7 +982,11 @@ export default function ChatScreen() {
                 </Text>
                 {msg.routedVia && (
                   <Text style={styles.routeBadge}>
-                    {msg.routedVia === 'local' ? '🖥️ private node' : '☁️  cloud'} · {msg.latency}ms
+                    {msg.model?.startsWith('adam')
+                      ? `⬡ ${msg.model} · ${msg.latency}ms`
+                      : msg.routedVia === 'local'
+                        ? `🖥️ private node · ${msg.latency}ms`
+                        : `☁️  cloud · ${msg.latency}ms`}
                   </Text>
                 )}
               </View>
@@ -914,14 +1065,46 @@ export default function ChatScreen() {
               editable={!isLoading}
               multiline
             />
-            <TouchableOpacity onPress={pickImage} style={styles.iconBtn}>
-              <Ionicons name="image" size={20} color="#4a9eff" />
+            <TouchableOpacity onPress={toggleActions} style={styles.iconBtn}>
+              <Animated.View style={{
+                transform: [{
+                  rotate: actionsAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '45deg'] }),
+                }],
+              }}>
+                <Ionicons name="add-circle-outline" size={22} color="#4a9eff" />
+              </Animated.View>
             </TouchableOpacity>
-            <TouchableOpacity
-              onPress={isRecording ? () => Voice.stop() : startVoiceInput}
-              style={[styles.iconBtn, isRecording && styles.recordingActive]}>
-              <Ionicons name={isRecording ? 'mic' : 'mic-outline'} size={20} color={isRecording ? '#ff4444' : '#4a9eff'} />
-            </TouchableOpacity>
+            {actionsExpanded && (
+              <Animated.View style={[
+                styles.actionsRow,
+                {
+                  opacity: actionsAnim,
+                  transform: [{
+                    translateX: actionsAnim.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }),
+                  }],
+                },
+              ]}>
+                <TouchableOpacity onPress={pickImage} style={styles.iconBtn}>
+                  <Ionicons name="image" size={20} color="#4a9eff" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={pickGraphFiles}
+                  disabled={isImportingFiles}
+                  style={[styles.iconBtn, isImportingFiles && { opacity: 0.4 }]}>
+                  <Ionicons name={isImportingFiles ? 'hourglass-outline' : 'cloud-upload-outline'} size={20} color="#4a9eff" />
+                </TouchableOpacity>
+                {hasGraphNodes && (
+                  <TouchableOpacity onPress={openLastGraph} style={styles.iconBtn}>
+                    <Ionicons name="git-network-outline" size={20} color="#4a9eff" />
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  onPress={isRecording ? () => Voice.stop() : startVoiceInput}
+                  style={[styles.iconBtn, isRecording && styles.recordingActive]}>
+                  <Ionicons name={isRecording ? 'mic' : 'mic-outline'} size={20} color={isRecording ? '#ff4444' : '#4a9eff'} />
+                </TouchableOpacity>
+              </Animated.View>
+            )}
             <TouchableOpacity onPress={handleSend} style={[styles.sendBtn, isLoading && { opacity: 0.5 }]} disabled={isLoading}>
               <Ionicons name="send" size={18} color="#00ff88" />
             </TouchableOpacity>
@@ -1121,6 +1304,7 @@ const styles = StyleSheet.create({
   inputCard: { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: 'rgba(20, 20, 35, 0.92)', borderRadius: 24, borderWidth: 1, borderColor: '#252540', paddingHorizontal: 12, paddingVertical: 6, gap: 8 },
   input: { flex: 1, fontFamily: FONT, fontSize: 14, color: '#d0d0e8', paddingVertical: 8, maxHeight: 80 },
   iconBtn: { padding: 8 },
+  actionsRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   recordingActive: { backgroundColor: 'rgba(255, 68, 68, 0.1)', borderRadius: 20 },
   sendBtn: { padding: 8 },
 
@@ -1128,6 +1312,10 @@ const styles = StyleSheet.create({
   stopBtn: { borderWidth: 1, borderColor: '#443333', borderRadius: 8, paddingHorizontal: 20, paddingVertical: 6 },
   stopBtnText: { fontFamily: FONT, fontSize: 11, color: '#cc6666', letterSpacing: 1 },
   exportBtn: { paddingHorizontal: 6, paddingVertical: 4 },
+  teamModeBtn: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 4, borderWidth: 1, borderColor: '#1e3a5f', marginRight: 2 },
+  teamModeBtnActive: { backgroundColor: '#0d2a4a', borderColor: '#4a9eff' },
+  teamModeBtnText: { fontFamily: FONT, fontSize: 9, color: '#3a5a7f', letterSpacing: 0.5 },
+  teamModeBtnTextActive: { color: '#4a9eff' },
   expandBtn: { paddingHorizontal: 4, paddingVertical: 4 },
   expandBtnText: { fontFamily: FONT, fontSize: 10, color: '#2a3a4a', letterSpacing: 1 },
   historyBtn: { paddingHorizontal: 8, paddingVertical: 4 },

@@ -22,7 +22,7 @@ import {
   View,
 } from 'react-native';
 import { router } from 'expo-router';
-import { checkPrivateNode, PrivateNodeStatus, getSelectedModel, setSelectedModel, DEFAULT_LOCAL_MODEL, getResponseMode, setResponseMode, DEFAULT_RESPONSE_MODE, type ResponseMode } from '@/services/localAI';
+import { checkPrivateNode, PrivateNodeStatus, getSelectedModel, setSelectedModel, DEFAULT_LOCAL_MODEL, getResponseMode, setResponseMode, DEFAULT_RESPONSE_MODE, type ResponseMode, getOllamaHost, setOllamaHost, DEFAULT_OLLAMA_HOST } from '@/services/localAI';
 import { getConversationStats } from '@/services/conversationDB';
 import { initToolDB, getRecentToolCalls, ToolCall } from '@/services/toolDB';
 import {
@@ -98,6 +98,10 @@ export default function SystemScreen() {
   // Response mode
   const [responseMode, setResponseModeState] = useState<ResponseMode>(DEFAULT_RESPONSE_MODE);
 
+  // Ollama host config
+  const [hostDraft, setHostDraft] = useState('');
+  const [hostSaved, setHostSaved] = useState(false);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     await initToolDB();
@@ -122,6 +126,7 @@ export default function SystemScreen() {
     });
     getSelectedModel().then(setSelectedModelState);
     getResponseMode().then(setResponseModeState);
+    getOllamaHost().then(setHostDraft);
   }, [refresh]);
 
   const doSearch = useCallback(async () => {
@@ -160,6 +165,28 @@ export default function SystemScreen() {
     setKeyDraft('');
     setWebSearchStatus('unavailable');
   }, []);
+
+  const saveHost = useCallback(async () => {
+    const trimmed = hostDraft.trim();
+    if (!trimmed) {
+      // Don't persist an empty value — fall back to whatever's already
+      // effective (a previously saved host, or the default).
+      const current = await getOllamaHost();
+      setHostDraft(current);
+      return;
+    }
+    await setOllamaHost(trimmed);
+    setHostDraft(trimmed);
+    setHostSaved(true);
+    setTimeout(() => setHostSaved(false), 2000);
+
+    // Refresh status immediately rather than waiting for the next natural check.
+    setLoading(true);
+    const node = await checkPrivateNode();
+    setNodeStatus(node);
+    setCheckedAt(Date.now());
+    setLoading(false);
+  }, [hostDraft]);
 
   const route          = nodeStatus?.online ? 'local' : 'cloud';
   const activeModel    = nodeStatus?.online ? selectedModel.replace(/:latest$/, '') : CLOUD_MODEL;
@@ -356,6 +383,28 @@ export default function SystemScreen() {
                   </TouchableOpacity>
                 );
               })}
+            </View>
+          </View>
+          <View style={s.configRow}>
+            <Text style={s.label}>ollama host</Text>
+            <View style={s.configInputRow}>
+              <TextInput
+                style={s.configInput}
+                value={hostDraft}
+                onChangeText={setHostDraft}
+                placeholder={DEFAULT_OLLAMA_HOST}
+                placeholderTextColor="#2a2a2a"
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                returnKeyType="done"
+                onSubmitEditing={saveHost}
+              />
+              <TouchableOpacity onPress={saveHost} style={s.configSaveBtn}>
+                <Text style={[s.configSaveText, hostSaved && { color: '#00ff88' }]}>
+                  {hostSaved ? 'saved' : 'save'}
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
           <View style={s.configRow}>
