@@ -28,7 +28,7 @@ import PdfExtractorWebView, { type PdfExtractorHandle } from '@/components/PdfEx
 import { networkMonitor } from '@/services/networkMonitor';
 import { checkInjection, sanitizeOutput, classifyData, logSecurityEvent } from '@/services/securityGateway';
 import { canAccessVault, unlockVault, lockVault } from '@/services/dataVault';
-import { routeAI, routeTeamMode } from '@/services/aiRouter';
+import { routeAI } from '@/services/aiRouter';
 import { webSearch, type SearchResult } from '@/services/tools/webSearch';
 import { checkPrivateNode, type PrivateNodeStatus } from '@/services/localAI';
 import {
@@ -133,9 +133,6 @@ export default function ChatScreen() {
   const inputTextRef = useRef('');
   const sendMessageRef = useRef<(text: string) => void>(() => {});
 
-  // Team mode state
-  const [teamMode, setTeamMode] = useState(false);
-  const TEAM_MODE_KEY = 'teamMode_v2';
 
   // Auth & security
   const [authLocked, setAuthLocked] = useState(true);
@@ -238,9 +235,6 @@ export default function ChatScreen() {
       try {
         await initConversationDB();
         const convoId = await getLatestConversationId();
-        // Load persisted team mode preference
-        const savedTeamMode = await AsyncStorage.getItem(TEAM_MODE_KEY);
-        if (savedTeamMode === 'true') setTeamMode(true);
         setActiveConversationId(convoId);
         const rows = await loadConversation(convoId);
         if (rows.length > 0) {
@@ -423,11 +417,9 @@ export default function ChatScreen() {
 
       // Streaming placeholder — inserted immediately so the UI shows activity at once.
       // For local route: tokens fill it in real time. For cloud: replaced on completion.
-      // Empty-bubble fix: team mode takes longer (classify + worker + synthesize) so we
-      // show '...' instead of an empty string to avoid a visibly blank bubble.
       const streamingId = `${Date.now()}_assistant`;
       streamingMsgIdRef.current = streamingId;
-      setMessages(prev => [...prev, { id: streamingId, role: 'assistant' as const, content: teamMode ? '...' : '' }]);
+      setMessages(prev => [...prev, { id: streamingId, role: 'assistant' as const, content: '' }]);
 
       const onToken = (token: string) => {
         streamingContentRef.current += token;
@@ -469,7 +461,7 @@ export default function ChatScreen() {
         toolContext,
         signal: cancelRef.current!.signal,
       };
-      const result = await (teamMode ? routeTeamMode(routeParams) : routeAI(routeParams));
+      const result = await routeAI(routeParams);
 
       streamingMsgIdRef.current = null;
       const reply = sanitizeOutput(result.text);
@@ -922,22 +914,9 @@ export default function ChatScreen() {
           <TouchableOpacity onPress={handleNewChat} style={styles.newChatBtn}>
             <Text style={styles.newChatText}>+ new</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>{teamMode ? 'Adam' : 'Claude'}</Text>
+          <Text style={styles.headerTitle}>Claude</Text>
           <View style={styles.headerRight}>
-            <TouchableOpacity
-              onPress={() => {
-                const next = !teamMode;
-                setTeamMode(next);
-                AsyncStorage.setItem(TEAM_MODE_KEY, next ? 'true' : 'false').catch(() => {});
-              }}
-              style={[styles.teamModeBtn, teamMode && styles.teamModeBtnActive]}>
-              <Text style={[styles.teamModeBtnText, teamMode && styles.teamModeBtnTextActive]}>
-                {teamMode ? '⬡ team' : '⬡'}
-              </Text>
-            </TouchableOpacity>
-            {teamMode ? (
-              <Text style={[styles.nodeBadge, { color: '#4a9eff' }]}>☁️ cloud</Text>
-            ) : isCheckingNode ? (
+            {isCheckingNode ? (
               <Text style={[styles.nodeBadge, { color: '#888888' }]}>checking node...</Text>
             ) : nodeStatus !== null && (
               <Text style={[styles.nodeBadge, { color: nodeStatus.online ? '#44cc88' : '#cc4444' }]}>
@@ -1312,10 +1291,6 @@ const styles = StyleSheet.create({
   stopBtn: { borderWidth: 1, borderColor: '#443333', borderRadius: 8, paddingHorizontal: 20, paddingVertical: 6 },
   stopBtnText: { fontFamily: FONT, fontSize: 11, color: '#cc6666', letterSpacing: 1 },
   exportBtn: { paddingHorizontal: 6, paddingVertical: 4 },
-  teamModeBtn: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 4, borderWidth: 1, borderColor: '#1e3a5f', marginRight: 2 },
-  teamModeBtnActive: { backgroundColor: '#0d2a4a', borderColor: '#4a9eff' },
-  teamModeBtnText: { fontFamily: FONT, fontSize: 9, color: '#3a5a7f', letterSpacing: 0.5 },
-  teamModeBtnTextActive: { color: '#4a9eff' },
   expandBtn: { paddingHorizontal: 4, paddingVertical: 4 },
   expandBtnText: { fontFamily: FONT, fontSize: 10, color: '#2a3a4a', letterSpacing: 1 },
   historyBtn: { paddingHorizontal: 8, paddingVertical: 4 },
