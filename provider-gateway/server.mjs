@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { TOOL_MANIFEST, runReadOnlyTool } from './tools.mjs';
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.PROVIDER_GATEWAY_PORT || 8787);
@@ -134,6 +135,53 @@ const server = http.createServer(async (req, res) => {
       req.url || '/',
       `http://${req.headers.host || `${HOST}:${PORT}`}`
     );
+
+    if (req.method === 'GET' && url.pathname === '/tools/manifest') {
+      return sendJson(res, 200, {
+        ok: true,
+        tools: TOOL_MANIFEST,
+      });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/tools/run') {
+      const body = await readJson(req);
+
+      if (typeof body.tool !== 'string') {
+        return sendJson(res, 400, { error: 'tool_required' });
+      }
+
+      const started = Date.now();
+
+      try {
+        const result = await runReadOnlyTool(body.tool);
+
+        console.log(
+          `[Tool] ${body.tool} completed (${Date.now() - started}ms)`
+        );
+
+        return sendJson(res, 200, {
+          ok: true,
+          tool: body.tool,
+          duration_ms: Date.now() - started,
+          result,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : String(error);
+
+        console.warn(`[Tool] ${body.tool} failed: ${message}`);
+
+        return sendJson(
+          res,
+          message.startsWith('unknown_tool:') ? 400 : 500,
+          {
+            error: message.startsWith('unknown_tool:')
+              ? 'unknown_tool'
+              : 'tool_failed',
+          }
+        );
+      }
+    }
 
     if (req.method === 'GET' && url.pathname === '/health') {
       return sendJson(res, 200, {
