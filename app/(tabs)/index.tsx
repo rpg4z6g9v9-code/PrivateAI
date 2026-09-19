@@ -913,7 +913,7 @@ export default function ChatScreen() {
           <TouchableOpacity onPress={handleNewChat} style={styles.newChatBtn}>
             <Text style={styles.newChatText}>+ new</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Claude</Text>
+          <Text style={styles.headerTitle}>Cordelia</Text>
           <View style={styles.headerRight}>
             {isCheckingNode ? (
               <Text style={[styles.nodeBadge, { color: '#888888' }]}>checking node...</Text>
@@ -1036,7 +1036,7 @@ export default function ChatScreen() {
             <TextInput
               ref={() => {}}
               style={styles.input}
-              placeholder="Ask Claude..."
+              placeholder="Ask Cordelia..."
               placeholderTextColor="#666"
               value={inputText}
               onChangeText={setInputText}
