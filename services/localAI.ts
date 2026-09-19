@@ -21,12 +21,13 @@ import { initLlama, releaseAllLlama } from 'llama.rn';
 import type { LlamaContext } from 'llama.rn';
 import { LOCAL_PROMPTS } from './personaPrompts';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Device from 'expo-device';
 
 // ─── Ollama host config ───────────────────────────────────────
 // Persisted so the user can change it in Settings without a rebuild.
 
 const OLLAMA_HOST_KEY = 'ollama_host_v1';
-export const DEFAULT_OLLAMA_HOST = '192.168.4.52:11434';
+export const DEFAULT_OLLAMA_HOST = Device.isDevice ? '192.168.4.52:11434' : '127.0.0.1:11434';
 
 const LOCAL_MODEL_KEY = 'local_model_v1';
 export const DEFAULT_LOCAL_MODEL = 'phi4-mini:latest';
