@@ -5,11 +5,13 @@
  * Used to show offline indicator and fallback routing.
  */
 
+import { providerGatewayUrl } from './providerGateway';
+
 let isConnected = true;
 let checkInterval: ReturnType<typeof setInterval> | null = null;
 let lastCheckTime = 0;
 
-const CLAUDE_API_KEY = process.env.EXPO_PUBLIC_CLAUDE_API_KEY ?? '';
+const GATEWAY_HEALTH_URL = providerGatewayUrl('/health');
 const CHECK_INTERVAL_MS = 30_000; // 30 seconds
 const TIMEOUT_MS = 5_000; // 5 second timeout per check
 
@@ -51,13 +53,12 @@ async function checkOnce(): Promise<void> {
   lastCheckTime = now;
 
   try {
-    // Minimal request — just check if API is reachable
-    // No authentication needed for this HEAD check
+    // Minimal request — check the local provider gateway health endpoint
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'HEAD',
+    const response = await fetch(GATEWAY_HEALTH_URL, {
+      method: 'GET',
       signal: controller.signal,
     });
 

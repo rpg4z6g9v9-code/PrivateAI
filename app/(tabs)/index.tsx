@@ -64,7 +64,6 @@ interface AttachmentImage {
 
 // ── Constants ──────────────────────────────────────────────────
 const FONT = 'Courier New';
-const CLAUDE_API_KEY = process.env.EXPO_PUBLIC_CLAUDE_API_KEY ?? '';
 // HISTORY_KEY kept for reference; messages now persisted in SQLite via conversationDB.ts
 // const HISTORY_KEY = 'chat_history_v1';
 const AUTH_LOCKED_KEY = 'auth_locked_v1';
@@ -468,7 +467,7 @@ export default function ChatScreen() {
 
       networkMonitor.logCall({
         destination: result.route === 'local' ? 'local_llama' : 'claude_api',
-        url: result.route === 'local' ? 'localhost:11434' : 'api.anthropic.com',
+        url: result.route === 'local' ? 'localhost:11434' : 'provider-gateway/claude',
         dataSizeBytes: JSON.stringify(newMessages).length,
         description: `Chat message (${isSensitive ? 'sensitive' : 'regular'})`,
         containsMedicalAlert: dataClass.hasMedical,

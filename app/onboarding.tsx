@@ -2,7 +2,7 @@
  * onboarding.tsx — PrivateAI First-Run Setup
  *
  * Three-step flow:
- *   1. API Key — paste Claude key, validate, store in Keychain
+ *   1. Gateway — verify optional cloud fallback
  *   2. Permissions — mic, calendar, reminders, Face ID
  *   3. Meet Atlas — brief intro, start chatting
  */
@@ -11,18 +11,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import secureStorage from '@/services/secureStorage';
+import { getProviderGatewayHealth } from '@/services/providerGateway';
 import * as LocalAuth from 'expo-local-authentication';
 
 async function requestCalendarPermissions(): Promise<boolean> { return false; }
@@ -30,40 +29,12 @@ async function requestRemindersPermissions(): Promise<boolean> { return false; }
 
 const FONT = Platform.OS === 'ios' ? 'Courier New' : 'monospace';
 const ONBOARDING_COMPLETE_KEY = 'onboarding_complete_v1';
-const API_KEY_STORE = 'user_claude_api_key_v1';
-
-// ─── Helpers ─────────────────────────────────────────────────
-
-async function validateClaudeKey(key: string): Promise<boolean> {
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1,
-        messages: [{ role: 'user', content: 'hi' }],
-      }),
-    });
-    // 200 = valid key with credits
-    // 400 = valid key, bad request (still means auth passed)
-    return res.status === 200 || res.status === 400;
-  } catch {
-    return false;
-  }
-}
-
 // ─── Component ───────────────────────────────────────────────
 
 export default function OnboardingScreen() {
   const [step, setStep] = useState(0);
-  const [apiKey, setApiKey] = useState('');
-  const [validating, setValidating] = useState(false);
-  const [keyError, setKeyError] = useState('');
+  const [gatewayChecking, setGatewayChecking] = useState(false);
+  const [gatewayError, setGatewayError] = useState('');
 
   // Permissions state
   const [micGranted, setMicGranted] = useState(false);
@@ -71,27 +42,26 @@ export default function OnboardingScreen() {
   const [remGranted, setRemGranted] = useState(false);
   const [faceIdAvailable, setFaceIdAvailable] = useState(false);
 
-  // ── Step 1: API Key ──────────────────────────────────────────
+  // ── Step 1: Provider gateway ──────────────────────────────────
+  const handleCheckGateway = useCallback(async () => {
+    setGatewayChecking(true);
+    setGatewayError('');
 
-  const handleValidateKey = useCallback(async () => {
-    const trimmed = apiKey.trim();
-    if (!trimmed.startsWith('sk-ant-')) {
-      setKeyError('Key should start with sk-ant-');
+    const health = await getProviderGatewayHealth();
+    setGatewayChecking(false);
+
+    if (!health?.ok) {
+      setGatewayError('Provider gateway is not reachable. Start it on your Mac or continue local-only.');
       return;
     }
-    setValidating(true);
-    setKeyError('');
 
-    const valid = await validateClaudeKey(trimmed);
-    setValidating(false);
-
-    if (valid) {
-      await secureStorage.setItem(API_KEY_STORE, trimmed);
-      setStep(1);
-    } else {
-      setKeyError('Invalid key or no credits. Check console.anthropic.com');
+    if (!health.providers?.claude) {
+      setGatewayError('Gateway is running, but Claude is not configured on the Mac.');
+      return;
     }
-  }, [apiKey]);
+
+    setStep(1);
+  }, []);
 
   // ── Step 2: Permissions ──────────────────────────────────────
 
@@ -144,37 +114,25 @@ export default function OnboardingScreen() {
           ))}
         </View>
 
-        {/* ── Step 0: API Key ── */}
+        {/* ── Step 0: Provider gateway ── */}
         {step === 0 && (
           <View style={s.stepContainer}>
-            <Text style={s.stepTitle}>cloud ai (optional)</Text>
+            <Text style={s.stepTitle}>cloud gateway (optional)</Text>
+
             <Text style={s.stepDesc}>
-              PrivateAI runs locally on your Mac Mini — no cloud required.{'\n\n'}
-              If you want Claude as a fallback for cloud routing, paste an API key below. Otherwise, skip.
+              PrivateAI runs locally on your private Mac node — no cloud required.{'\n\n'}
+              Claude fallback uses the provider gateway on your Mac. No Claude API key is stored inside the app.
             </Text>
 
-            <TextInput
-              style={s.input}
-              value={apiKey}
-              onChangeText={t => { setApiKey(t); setKeyError(''); }}
-              placeholder="sk-ant-api03-... (optional)"
-              placeholderTextColor="#333"
-              autoCapitalize="none"
-              autoCorrect={false}
-              secureTextEntry
-            />
-
-            {keyError !== '' && <Text style={s.error}>{keyError}</Text>}
+            {gatewayError !== '' && <Text style={s.error}>{gatewayError}</Text>}
 
             <TouchableOpacity
-              style={[s.primaryBtn, (!apiKey.trim() || validating) && s.btnDisabled]}
-              onPress={handleValidateKey}
-              disabled={!apiKey.trim() || validating}>
-              {validating ? (
-                <ActivityIndicator color="#000" size="small" />
-              ) : (
-                <Text style={s.primaryBtnText}>validate & continue</Text>
-              )}
+              style={[s.primaryBtn, gatewayChecking && s.btnDisabled]}
+              onPress={handleCheckGateway}
+              disabled={gatewayChecking}>
+              <Text style={s.primaryBtnText}>
+                {gatewayChecking ? 'checking...' : 'check gateway & continue'}
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity onPress={() => setStep(1)}>
@@ -182,7 +140,7 @@ export default function OnboardingScreen() {
             </TouchableOpacity>
 
             <Text style={s.hint}>
-              If added, your key is stored in the iOS Keychain (AES-256).{'\n'}It never leaves your device.
+              Provider credentials stay on the Mac and are never bundled into the iPhone app.
             </Text>
           </View>
         )}
@@ -249,14 +207,14 @@ export default function OnboardingScreen() {
             <View style={s.infoCard}>
               <Text style={[s.infoTitle, { color: '#4db8ff' }]}>Cloud fallback (Claude)</Text>
               <Text style={s.infoDesc}>
-                When the private node is offline, general queries route to Claude via the Anthropic API. Medical or sensitive data is never sent to cloud — it waits for the local node.
+                When the private node is offline, general queries can route to Claude through your Mac provider gateway. Provider credentials remain on the Mac. Medical or sensitive data is never sent to cloud — it waits for the local node.
               </Text>
             </View>
 
             <View style={s.infoCard}>
               <Text style={[s.infoTitle, { color: '#ccc' }]}>Local is slower</Text>
               <Text style={s.infoDesc}>
-                The on-device model (phi4-mini) is smaller and takes a few extra seconds to respond. Cloud responses are faster. Both routes show route and latency in the chat.
+                The local model (phi4-mini) is smaller and may take a few extra seconds to respond. Cloud responses can be faster. Both routes show route and latency in the chat.
               </Text>
             </View>
 
@@ -270,7 +228,7 @@ export default function OnboardingScreen() {
             <View style={s.infoCard}>
               <Text style={[s.infoTitle, { color: '#f59e0b' }]}>Knowledge cutoff</Text>
               <Text style={s.infoDesc}>
-                AI models have a training cutoff — they may not know about recent events, current prices, or news. There is no live web access.
+                AI models have a training cutoff. Web search can provide current information when it is configured in System settings.
               </Text>
             </View>
 
@@ -368,4 +326,4 @@ export async function isOnboardingComplete(): Promise<boolean> {
   return val === 'true';
 }
 
-export { ONBOARDING_COMPLETE_KEY, API_KEY_STORE };
+export { ONBOARDING_COMPLETE_KEY };

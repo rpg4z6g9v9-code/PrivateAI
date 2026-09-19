@@ -12,9 +12,9 @@
 import { AIRouteParams, AIRouteResult, ConversationMessage, ClaudeAPIRequest, ClaudeAPIResponse } from '@/services/claude';
 import { generateLocal, isModelLoaded, getSelectedModel, getResponseMode, type ResponseMode } from '@/services/localAI';
 import { getBraveApiKey, getWebSearchStatus, updateWebSearchStatus, type WebSearchStatus } from '@/services/tools/webSearch';
+import { providerGatewayUrl } from '@/services/providerGateway';
 
-const CLAUDE_API_KEY = process.env.EXPO_PUBLIC_CLAUDE_API_KEY ?? '';
-const CLAUDE_API_BASE = 'https://api.anthropic.com/v1/messages';
+const CLAUDE_GATEWAY_URL = providerGatewayUrl('/claude');
 
 // Suppress repeated node-state logs — only log on transition
 let _lastLoggedNodeOnline: boolean | null = null;
@@ -226,10 +226,6 @@ export async function routeAI(params: AIRouteParams): Promise<AIRouteResult> {
 // ── Cloud Route ──────────────────────────────────────────────
 
 async function cloudRoute(messages: ConversationMessage[], capabilities: Capabilities, toolContext?: string, signal?: AbortSignal): Promise<AIRouteResult> {
-  if (!CLAUDE_API_KEY) {
-    throw new Error('Cloud AI unavailable — API key not configured. Check EXPO_PUBLIC_CLAUDE_API_KEY.');
-  }
-
   const start = Date.now();
   console.log('[Cloud] Request starting');
 
@@ -242,12 +238,10 @@ async function cloudRoute(messages: ConversationMessage[], capabilities: Capabil
 
   let response: Response;
   try {
-    response = await fetch(CLAUDE_API_BASE, {
+    response = await fetch(CLAUDE_GATEWAY_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': CLAUDE_API_KEY,
-        'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify(payload),
       signal,

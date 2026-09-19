@@ -14,15 +14,11 @@ GET /health
 
 POST /claude
 
-POST /search
-
 GET /elevenlabs/voices
 
 ## Required environment variables
 
 CLAUDE_API_KEY
-
-TAVILY_API_KEY
 
 ELEVENLABS_API_KEY
 

@@ -4,7 +4,6 @@ const HOST = '127.0.0.1';
 const PORT = Number(process.env.PROVIDER_GATEWAY_PORT || 8787);
 
 const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || '';
-const TAVILY_API_KEY = process.env.TAVILY_API_KEY || '';
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || '';
 
 function sendJson(res, status, body) {
@@ -108,44 +107,6 @@ async function handleClaude(req, res) {
   sendUpstream(res, upstream, text);
 }
 
-async function handleSearch(req, res) {
-  if (!TAVILY_API_KEY) {
-    return sendJson(res, 503, {
-      error: 'tavily_not_configured',
-    });
-  }
-
-  const body = await readJson(req);
-
-  if (typeof body.query !== 'string' || !body.query.trim()) {
-    return sendJson(res, 400, {
-      error: 'query_required',
-    });
-  }
-
-  const query = body.query.trim().slice(0, 2000);
-
-  const upstream = await fetchWithTimeout(
-    'https://api.tavily.com/search',
-    {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        api_key: TAVILY_API_KEY,
-        query,
-        search_depth: 'basic',
-        max_results: 5,
-        include_answer: true,
-      }),
-    }
-  );
-
-  const text = await upstream.text();
-  sendUpstream(res, upstream, text);
-}
-
 async function handleVoices(res) {
   if (!ELEVENLABS_API_KEY) {
     return sendJson(res, 503, {
@@ -181,7 +142,6 @@ const server = http.createServer(async (req, res) => {
         port: PORT,
         providers: {
           claude: Boolean(CLAUDE_API_KEY),
-          tavily: Boolean(TAVILY_API_KEY),
           elevenlabs: Boolean(ELEVENLABS_API_KEY),
         },
       });
@@ -189,10 +149,6 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && url.pathname === '/claude') {
       return await handleClaude(req, res);
-    }
-
-    if (req.method === 'POST' && url.pathname === '/search') {
-      return await handleSearch(req, res);
     }
 
     if (req.method === 'GET' && url.pathname === '/elevenlabs/voices') {
@@ -229,7 +185,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`[Gateway] listening on http://${HOST}:${PORT}`);
   console.log(
-    `[Gateway] providers: Claude=${Boolean(CLAUDE_API_KEY)} Tavily=${Boolean(TAVILY_API_KEY)} ElevenLabs=${Boolean(ELEVENLABS_API_KEY)}`
+    `[Gateway] providers: Claude=${Boolean(CLAUDE_API_KEY)} ElevenLabs=${Boolean(ELEVENLABS_API_KEY)}`
   );
 });
 
