@@ -76,11 +76,29 @@ async function gitStatus() {
   const status = await git(['status', '--short']);
   const latest = await git(['log', '-1', '--oneline']);
 
+  const changes = status
+    ? status.split('\n').map(line => {
+        const match = line.match(/^(.{2})\s+(.*)$/);
+        const code = match?.[1] ?? line.slice(0, 2);
+        const file = match?.[2] ?? line.slice(2).trim();
+
+        let status = 'changed';
+
+        if (code === '??') status = 'untracked';
+        else if (code.includes('M')) status = 'modified';
+        else if (code.includes('A')) status = 'added';
+        else if (code.includes('D')) status = 'deleted';
+        else if (code.includes('R')) status = 'renamed';
+
+        return { file, status };
+      })
+    : [];
+
   return {
     repository: path.basename(REPO),
     branch,
-    clean: !status,
-    changes: status ? status.split('\n') : [],
+    clean: changes.length === 0,
+    changes,
     latestCommit: latest,
   };
 }
@@ -96,7 +114,17 @@ async function gitDiff() {
   const unstaged = await git(['diff', '--no-ext-diff', '--unified=3']);
   const staged = await git(['diff', '--cached', '--no-ext-diff', '--unified=3']);
 
+  const unstagedFiles = await git(['diff', '--name-status']);
+  const stagedFiles = await git(['diff', '--cached', '--name-status']);
+
+  const unstagedStat = await git(['diff', '--stat']);
+  const stagedStat = await git(['diff', '--cached', '--stat']);
+
   return {
+    unstagedFiles: unstagedFiles ? unstagedFiles.split('\n') : [],
+    stagedFiles: stagedFiles ? stagedFiles.split('\n') : [],
+    unstagedStat,
+    stagedStat,
     unstaged: capped(unstaged),
     staged: capped(staged),
   };

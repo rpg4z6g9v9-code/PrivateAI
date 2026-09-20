@@ -29,6 +29,7 @@ import { networkMonitor } from '@/services/networkMonitor';
 import { checkInjection, sanitizeOutput, classifyData, logSecurityEvent } from '@/services/securityGateway';
 import { canAccessVault, unlockVault, lockVault } from '@/services/dataVault';
 import { routeAI } from '@/services/aiRouter';
+import { buildReadOnlyMacToolContext } from '@/services/readOnlyTools';
 import { webSearch, type SearchResult } from '@/services/tools/webSearch';
 import { checkPrivateNode, type PrivateNodeStatus } from '@/services/localAI';
 import {
@@ -427,23 +428,48 @@ export default function ChatScreen() {
         ));
       };
 
-      // Tool execution: run web search before routing if intent detected.
-      // Results are injected into the system prompt for this turn only.
-      let toolContext: string | undefined;
+      // Deterministic Tier-0 read-only Mac tools.
+      const toolContextParts: string[] = [];
+
+      const macToolContext = await buildReadOnlyMacToolContext(text);
+      if (macToolContext) {
+        toolContextParts.push(macToolContext);
+      }
+
+      // Web search remains separate and read-only.
       const searchQuery = detectSearchQuery(text);
       if (searchQuery) {
         const searchRes = await webSearch(searchQuery, {
           conversationId: activeConversationId,
           route: freshStatus.online ? 'local' : 'cloud',
         });
-        toolContext = formatToolContext(searchRes.results, searchRes.query, searchRes.error);
-        // Screen external tool output before prompt injection.
-        // Web search results arrive from an untrusted external source and must be
-        // checked for injection patterns before entering the system prompt.
+
+        toolContextParts.push(
+          formatToolContext(
+            searchRes.results,
+            searchRes.query,
+            searchRes.error
+          )
+        );
+      }
+
+      let toolContext =
+        toolContextParts.length > 0
+          ? toolContextParts.join('\n\n')
+          : undefined;
+
+      // Screen all tool output before it enters the model prompt.
+      if (toolContext) {
         const toolContextCheck = checkInjection(toolContext);
+
         if (toolContextCheck.detected) {
-          logSecurityEvent('tool_output_injection', 'web.search result').catch(() => {});
-          toolContext = '[web.search: result filtered — injection pattern detected]';
+          logSecurityEvent(
+            'tool_output_injection',
+            'read-only tool result'
+          ).catch(() => {});
+
+          toolContext =
+            '[tool results filtered — injection pattern detected]';
         }
       }
 
