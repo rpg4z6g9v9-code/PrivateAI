@@ -1,8 +1,20 @@
 import http from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { TOOL_MANIFEST, runReadOnlyTool } from './tools.mjs';
 
-const HOST = '127.0.0.1';
+const HOST = process.env.PROVIDER_GATEWAY_HOST || '127.0.0.1';
 const PORT = Number(process.env.PROVIDER_GATEWAY_PORT || 8787);
+const GATEWAY_TOKEN = process.env.PROVIDER_GATEWAY_TOKEN || '';
+
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
+const LAN_EXPOSED = !LOOPBACK_HOSTS.has(HOST);
+
+if (LAN_EXPOSED && !GATEWAY_TOKEN) {
+  console.error(
+    '[Gateway] refusing LAN bind without PROVIDER_GATEWAY_TOKEN'
+  );
+  process.exit(1);
+}
 
 const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || '';
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || '';
@@ -23,6 +35,24 @@ function sendUpstream(res, upstream, body) {
     'cache-control': 'no-store',
   });
   res.end(body);
+}
+
+function requestAuthorized(req) {
+  // Existing loopback-only behavior stays compatible when no token is set.
+  if (!GATEWAY_TOKEN) return true;
+
+  const header = req.headers.authorization || '';
+  const prefix = 'Bearer ';
+
+  if (!header.startsWith(prefix)) return false;
+
+  const supplied = Buffer.from(header.slice(prefix.length));
+  const expected = Buffer.from(GATEWAY_TOKEN);
+
+  return (
+    supplied.length === expected.length &&
+    timingSafeEqual(supplied, expected)
+  );
 }
 
 async function readJson(req) {
@@ -136,6 +166,12 @@ const server = http.createServer(async (req, res) => {
       `http://${req.headers.host || `${HOST}:${PORT}`}`
     );
 
+    if (!requestAuthorized(req)) {
+      return sendJson(res, 401, {
+        error: 'unauthorized',
+      });
+    }
+
     if (req.method === 'GET' && url.pathname === '/tools/manifest') {
       return sendJson(res, 200, {
         ok: true,
@@ -234,6 +270,9 @@ server.listen(PORT, HOST, () => {
   console.log(`[Gateway] listening on http://${HOST}:${PORT}`);
   console.log(
     `[Gateway] providers: Claude=${Boolean(CLAUDE_API_KEY)} ElevenLabs=${Boolean(ELEVENLABS_API_KEY)}`
+  );
+  console.log(
+    `[Gateway] access: ${LAN_EXPOSED ? 'LAN' : 'loopback'} · auth=${GATEWAY_TOKEN ? 'required' : 'off'}`
   );
 });
 
