@@ -4,7 +4,12 @@ export type ReadOnlyMacTool =
   | 'ollama.status'
   | 'system.info'
   | 'git.status'
-  | 'git.diff';
+  | 'git.diff'
+  | 'github.repo'
+  | 'github.commits'
+  | 'github.issues'
+  | 'github.pull_requests'
+  | 'github.actions';
 
 type ToolRunResponse = {
   ok?: boolean;
@@ -16,7 +21,10 @@ type ToolRunResponse = {
 
 function detectTools(text: string): ReadOnlyMacTool[] {
   const tools = new Set<ReadOnlyMacTool>();
-  const q = text.toLowerCase();
+  const q = text
+    .toLowerCase()
+    .replace(/[’‘]/g, "'")
+    .replace(/[“”]/g, '"');
 
   // General self/system health.
   if (
@@ -60,6 +68,57 @@ function detectTools(text: string): ReadOnlyMacTool[] {
     tools.add('git.diff');
   }
 
+
+  // GitHub overview.
+  if (
+    /\bwhat(?:'s| is) on github\b/.test(q) ||
+    /\bgithub (?:status|overview|summary)\b/.test(q) ||
+    /\bcheck github\b/.test(q)
+  ) {
+    tools.add('github.repo');
+    tools.add('github.commits');
+    tools.add('github.issues');
+    tools.add('github.pull_requests');
+    tools.add('github.actions');
+  }
+
+  // Remote GitHub commits.
+  if (
+    /\bgithub commits?\b/.test(q) ||
+    /\brecent commits? on github\b/.test(q) ||
+    /\bremote commits?\b/.test(q)
+  ) {
+    tools.add('github.commits');
+  }
+
+  // Issues.
+  if (
+    /\bopen issues?\b/.test(q) ||
+    /\bgithub issues?\b/.test(q) ||
+    /\bany issues?\b/.test(q)
+  ) {
+    tools.add('github.issues');
+  }
+
+  // Pull requests.
+  if (
+    /\bpull requests?\b/.test(q) ||
+    /\bprs?\b/.test(q) ||
+    /\bopen prs?\b/.test(q)
+  ) {
+    tools.add('github.pull_requests');
+  }
+
+  // GitHub Actions / CI.
+  if (
+    /\bgithub actions?\b/.test(q) ||
+    /\bci (?:status|pass|passed|fail|failed)\b/.test(q) ||
+    /\bdid (?:ci|the build) pass\b/.test(q) ||
+    /\bworkflow runs?\b/.test(q)
+  ) {
+    tools.add('github.actions');
+  }
+
   return [...tools];
 }
 
@@ -78,7 +137,13 @@ function formatToolResult(
   tool: ReadOnlyMacTool,
   result: unknown
 ): string {
-  const r = record(result);
+  const isGitHubListTool =
+    tool === 'github.commits' ||
+    tool === 'github.issues' ||
+    tool === 'github.pull_requests' ||
+    tool === 'github.actions';
+
+  const r = record(result) ?? (isGitHubListTool ? {} : null);
 
   if (!r) return `${tool}: no structured result`;
 
@@ -160,12 +225,91 @@ function formatToolResult(
         stagedText ? cap(stagedText, 3000) : '(no staged patch)',
       ].join('\n');
     }
+    case 'github.repo': {
+      const defaultBranch =
+        record(r.defaultBranchRef)?.name ?? 'unknown';
+
+      return [
+        'REMOTE GITHUB REPOSITORY:',
+        `Repository: ${r.nameWithOwner ?? 'unknown'}.`,
+        `Visibility: ${r.isPrivate === true ? 'private' : 'public'}.`,
+        `Default branch: ${defaultBranch}.`,
+        `Description: ${r.description ?? 'none'}.`,
+        `URL: ${r.url ?? 'unknown'}.`,
+      ].join('\n');
+    }
+
+    case 'github.commits': {
+      const commits = Array.isArray(result) ? result : [];
+
+      if (!commits.length) {
+        return 'REMOTE GITHUB COMMITS: none returned.';
+      }
+
+      return [
+        'REMOTE GITHUB COMMITS (newest first):',
+        ...commits.slice(0, 10).map((c: any) =>
+          `${c.sha ?? 'unknown'} — ${c.message ?? ''} — ${c.author ?? 'unknown'} — ${c.date ?? 'unknown'}`
+        ),
+      ].join('\n');
+    }
+
+    case 'github.issues': {
+      const issues = Array.isArray(result) ? result : [];
+
+      if (!issues.length) {
+        return 'REMOTE GITHUB OPEN ISSUES: none.';
+      }
+
+      return [
+        'REMOTE GITHUB OPEN ISSUES:',
+        ...issues.map((i: any) =>
+          `#${i.number ?? '?'} ${i.title ?? ''} — ${i.url ?? ''}`
+        ),
+      ].join('\n');
+    }
+
+    case 'github.pull_requests': {
+      const prs = Array.isArray(result) ? result : [];
+
+      if (!prs.length) {
+        return 'REMOTE GITHUB OPEN PULL REQUESTS: none.';
+      }
+
+      return [
+        'REMOTE GITHUB OPEN PULL REQUESTS:',
+        ...prs.map((pr: any) =>
+          `#${pr.number ?? '?'} ${pr.title ?? ''} — ${pr.headRefName ?? '?'} -> ${pr.baseRefName ?? '?'}${pr.isDraft ? ' — DRAFT' : ''}`
+        ),
+      ].join('\n');
+    }
+
+    case 'github.actions': {
+      const runs = Array.isArray(result) ? result : [];
+
+      if (!runs.length) {
+        return [
+          'REMOTE GITHUB ACTIONS CHECK: SUCCESS.',
+          'Workflow runs found: 0.',
+          'No GitHub Actions workflow run exists to classify as passed or failed.',
+        ].join('\n');
+      }
+
+      return [
+        'REMOTE GITHUB ACTIONS (newest first):',
+        ...runs.slice(0, 10).map((run: any) =>
+          `${run.workflowName ?? run.name ?? 'workflow'} — status=${run.status ?? 'unknown'} — conclusion=${run.conclusion ?? 'unknown'} — branch=${run.headBranch ?? 'unknown'} — ${run.createdAt ?? ''}`
+        ),
+      ].join('\n');
+    }
+
+
   }
 }
 
 async function runTool(
   tool: ReadOnlyMacTool,
-  timeoutMs = 7000
+  timeoutMs = tool.startsWith('github.') ? 15000 : 7000
 ): Promise<ToolRunResponse> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -222,13 +366,16 @@ export async function buildReadOnlyMacToolContext(
     blocks.push(formatToolResult(tool, response.result));
   }
 
-  return [
+  const context = [
     'AUTHORITATIVE READ-ONLY MAC TOOL FACTS FOR THIS TURN:',
     'Use these concrete facts in the answer.',
     'Do not replace them with a generic status message.',
     'Do not claim anything was checked unless it appears below.',
     'If a requested check failed, state that it could not be checked.',
+    'A successful check that returns zero records is NOT a failed check. Report that zero records were found.',
     '',
     ...blocks,
   ].join('\n');
+
+  return context;
 }
