@@ -14,6 +14,11 @@ export const TOOL_MANIFEST = [
   { name: 'system.info', description: 'Read basic Mac system information.', tier: 0, readOnly: true },
   { name: 'git.status', description: 'Read PrivateAI Git branch and working-tree status.', tier: 0, readOnly: true },
   { name: 'git.diff', description: 'Read staged and unstaged PrivateAI diffs.', tier: 0, readOnly: true },
+  { name: 'github.repo', description: 'Read GitHub repository metadata.', tier: 0, readOnly: true },
+  { name: 'github.commits', description: 'Read recent GitHub commits.', tier: 0, readOnly: true },
+  { name: 'github.issues', description: 'Read open GitHub issues.', tier: 0, readOnly: true },
+  { name: 'github.pull_requests', description: 'Read open GitHub pull requests.', tier: 0, readOnly: true },
+  { name: 'github.actions', description: 'Read recent GitHub Actions workflow runs.', tier: 0, readOnly: true },
 ];
 
 async function git(args) {
@@ -130,12 +135,97 @@ async function gitDiff() {
   };
 }
 
+
+const GH = '/opt/homebrew/bin/gh';
+
+async function gh(args) {
+  const { stdout } = await execFileAsync(
+    GH,
+    args,
+    {
+      cwd: REPO,
+      timeout: 10000,
+      maxBuffer: 1024 * 1024,
+      encoding: 'utf8',
+    }
+  );
+
+  return stdout.trim();
+}
+
+async function githubRepo() {
+  const raw = await gh([
+    'repo', 'view',
+    '--json',
+    'nameWithOwner,url,description,isPrivate,defaultBranchRef'
+  ]);
+
+  return JSON.parse(raw);
+}
+
+async function githubCommits() {
+  const raw = await gh([
+    'api',
+    'repos/{owner}/{repo}/commits?per_page=10'
+  ]);
+
+  const rows = JSON.parse(raw);
+
+  return rows.map(commit => ({
+    sha: String(commit.sha ?? '').slice(0, 7),
+    message: commit.commit?.message?.split('\n')[0] ?? '',
+    author: commit.commit?.author?.name ?? null,
+    date: commit.commit?.author?.date ?? null,
+    url: commit.html_url ?? null,
+  }));
+}
+
+async function githubIssues() {
+  const raw = await gh([
+    'issue', 'list',
+    '--state', 'open',
+    '--limit', '20',
+    '--json',
+    'number,title,author,updatedAt,url,labels'
+  ]);
+
+  return JSON.parse(raw);
+}
+
+async function githubPullRequests() {
+  const raw = await gh([
+    'pr', 'list',
+    '--state', 'open',
+    '--limit', '20',
+    '--json',
+    'number,title,author,headRefName,baseRefName,updatedAt,url,isDraft'
+  ]);
+
+  return JSON.parse(raw);
+}
+
+async function githubActions() {
+  const raw = await gh([
+    'run', 'list',
+    '--limit', '20',
+    '--json',
+    'databaseId,name,workflowName,status,conclusion,event,headBranch,createdAt,updatedAt,url'
+  ]);
+
+  return JSON.parse(raw);
+}
+
 export async function runReadOnlyTool(name) {
   switch (name) {
     case 'ollama.status': return ollamaStatus();
     case 'system.info': return systemInfo();
     case 'git.status': return gitStatus();
     case 'git.diff': return gitDiff();
+    case 'github.repo': return githubRepo();
+    case 'github.commits': return githubCommits();
+    case 'github.issues': return githubIssues();
+    case 'github.pull_requests': return githubPullRequests();
+    case 'github.actions': return githubActions();
     default: throw new Error(`unknown_tool:${name}`);
   }
 }
