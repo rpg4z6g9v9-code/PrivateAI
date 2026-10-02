@@ -5,13 +5,12 @@
  * Used to show offline indicator and fallback routing.
  */
 
-import { providerGatewayUrl } from './providerGateway';
+import { providerGatewayFetch } from './providerGateway';
 
 let isConnected = true;
 let checkInterval: ReturnType<typeof setInterval> | null = null;
 let lastCheckTime = 0;
 
-const GATEWAY_HEALTH_URL = providerGatewayUrl('/health');
 const CHECK_INTERVAL_MS = 30_000; // 30 seconds
 const TIMEOUT_MS = 5_000; // 5 second timeout per check
 
@@ -57,7 +56,7 @@ async function checkOnce(): Promise<void> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-    const response = await fetch(GATEWAY_HEALTH_URL, {
+    const response = await providerGatewayFetch('/health', {
       method: 'GET',
       signal: controller.signal,
     });

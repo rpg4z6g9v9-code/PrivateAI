@@ -12,9 +12,8 @@
 import { AIRouteParams, AIRouteResult, ConversationMessage, ClaudeAPIRequest, ClaudeAPIResponse } from '@/services/claude';
 import { generateLocal, isModelLoaded, getSelectedModel, getResponseMode, type ResponseMode } from '@/services/localAI';
 import { getBraveApiKey, getWebSearchStatus, updateWebSearchStatus, type WebSearchStatus } from '@/services/tools/webSearch';
-import { providerGatewayUrl } from '@/services/providerGateway';
+import { providerGatewayFetch } from '@/services/providerGateway';
 
-const CLAUDE_GATEWAY_URL = providerGatewayUrl('/claude');
 
 // Suppress repeated node-state logs — only log on transition
 let _lastLoggedNodeOnline: boolean | null = null;
@@ -259,7 +258,7 @@ async function cloudRoute(messages: ConversationMessage[], capabilities: Capabil
 
   let response: Response;
   try {
-    response = await fetch(CLAUDE_GATEWAY_URL, {
+    response = await providerGatewayFetch('/claude', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

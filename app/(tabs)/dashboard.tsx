@@ -24,7 +24,7 @@ import {
   View,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { providerGatewayUrl } from '@/services/providerGateway';
+import { providerGatewayFetch } from '@/services/providerGateway';
 import {
   getSecurityLog,
   getSecurityStatus,
@@ -109,7 +109,6 @@ const STYLE_OPTIONS = [
 
 // ── ElevenLabs constants ─────────────────────────────────────
 
-const ELEVENLABS_VOICES_URL = providerGatewayUrl('/elevenlabs/voices');
 const EL_VOICE_KEY = 'elVoiceId_v1';
 const PERSONA_VOICE_KEY = (id: string) => `personaVoice_v1_${id}`;
 const RACHEL_VOICE_ID = '21m00Tcm4TlvDq8ikWAM';
@@ -184,7 +183,7 @@ export default function DashboardScreen() {
     setElLoading(true);
     setElError('');
     try {
-      const res = await fetch(ELEVENLABS_VOICES_URL);
+      const res = await providerGatewayFetch('/elevenlabs/voices');
       if (!res.ok) throw new Error(`${res.status}`);
       const data = await res.json();
       const premade = (data.voices ?? []).filter((v: ELVoice) => v.category === 'premade');

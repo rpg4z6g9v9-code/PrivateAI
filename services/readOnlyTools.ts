@@ -1,4 +1,4 @@
-import { providerGatewayUrl } from './providerGateway';
+import { providerGatewayFetch } from './providerGateway';
 
 export type ReadOnlyMacTool =
   | 'ollama.status'
@@ -315,7 +315,7 @@ async function runTool(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(providerGatewayUrl('/tools/run'), {
+    const response = await providerGatewayFetch('/tools/run', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

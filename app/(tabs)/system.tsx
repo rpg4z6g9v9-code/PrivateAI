@@ -29,6 +29,13 @@ import {
   webSearch, getBraveApiKey, setBraveApiKey, clearBraveApiKey,
   getWebSearchStatus, type WebSearchStatus, type SearchResult,
 } from '@/services/tools/webSearch';
+import {
+  getProviderGatewayBase,
+  setProviderGatewayBase,
+  getProviderGatewayToken,
+  setProviderGatewayToken,
+  clearProviderGatewayToken,
+} from '@/services/providerGateway';
 
 const FONT = 'SpaceMono-Regular';
 const VERSION_TAG = 'stable-websearch-gateway-v2';
@@ -102,6 +109,13 @@ export default function SystemScreen() {
   const [hostDraft, setHostDraft] = useState('');
   const [hostSaved, setHostSaved] = useState(false);
 
+  // Provider gateway config
+  const [gatewayBaseDraft, setGatewayBaseDraft] = useState('');
+  const [gatewayBaseSaved, setGatewayBaseSaved] = useState(false);
+  const [gatewayTokenDraft, setGatewayTokenDraft] = useState('');
+  const [gatewayTokenSaved, setGatewayTokenSaved] = useState(false);
+  const [gatewayTokenConfigured, setGatewayTokenConfigured] = useState(false);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     await initToolDB();
@@ -127,6 +141,11 @@ export default function SystemScreen() {
     getSelectedModel().then(setSelectedModelState);
     getResponseMode().then(setResponseModeState);
     getOllamaHost().then(setHostDraft);
+
+    getProviderGatewayBase().then(setGatewayBaseDraft);
+    getProviderGatewayToken().then(token => {
+      setGatewayTokenConfigured(token.length > 0);
+    });
   }, [refresh]);
 
   const doSearch = useCallback(async () => {
@@ -187,6 +206,44 @@ export default function SystemScreen() {
     setCheckedAt(Date.now());
     setLoading(false);
   }, [hostDraft]);
+
+  const saveGatewayBase = useCallback(async () => {
+    const trimmed = gatewayBaseDraft.trim();
+
+    if (!trimmed) {
+      const current = await getProviderGatewayBase();
+      setGatewayBaseDraft(current);
+      return;
+    }
+
+    try {
+      await setProviderGatewayBase(trimmed);
+      const normalized = await getProviderGatewayBase();
+      setGatewayBaseDraft(normalized);
+      setGatewayBaseSaved(true);
+      setTimeout(() => setGatewayBaseSaved(false), 2000);
+    } catch (error) {
+      console.warn('[Gateway] save URL failed:', error);
+    }
+  }, [gatewayBaseDraft]);
+
+  const saveGatewayToken = useCallback(async () => {
+    const trimmed = gatewayTokenDraft.trim();
+    if (!trimmed) return;
+
+    await setProviderGatewayToken(trimmed);
+    setGatewayTokenDraft('');
+    setGatewayTokenConfigured(true);
+    setGatewayTokenSaved(true);
+    setTimeout(() => setGatewayTokenSaved(false), 2000);
+  }, [gatewayTokenDraft]);
+
+  const clearGatewayToken = useCallback(async () => {
+    await clearProviderGatewayToken();
+    setGatewayTokenDraft('');
+    setGatewayTokenConfigured(false);
+    setGatewayTokenSaved(false);
+  }, []);
 
   const route          = nodeStatus?.online ? 'local' : 'cloud';
   const activeModel    = nodeStatus?.online ? selectedModel.replace(/:latest$/, '') : CLOUD_MODEL;
@@ -407,6 +464,81 @@ export default function SystemScreen() {
               </TouchableOpacity>
             </View>
           </View>
+          <View style={s.configRow}>
+            <Text style={s.label}>gateway url</Text>
+            <View style={s.configInputRow}>
+              <TextInput
+                style={s.configInput}
+                value={gatewayBaseDraft}
+                onChangeText={setGatewayBaseDraft}
+                placeholder="http://127.0.0.1:8787"
+                placeholderTextColor="#2a2a2a"
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                returnKeyType="done"
+                onSubmitEditing={saveGatewayBase}
+              />
+              <TouchableOpacity
+                onPress={saveGatewayBase}
+                style={s.configSaveBtn}
+              >
+                <Text
+                  style={[
+                    s.configSaveText,
+                    gatewayBaseSaved && { color: '#00ff88' },
+                  ]}
+                >
+                  {gatewayBaseSaved ? 'saved' : 'save'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={s.configRow}>
+            <Text style={s.label}>gateway token</Text>
+            <View style={s.configInputRow}>
+              <TextInput
+                style={s.configInput}
+                value={gatewayTokenDraft}
+                onChangeText={setGatewayTokenDraft}
+                placeholder={
+                  gatewayTokenConfigured
+                    ? 'stored securely'
+                    : 'not set'
+                }
+                placeholderTextColor="#2a2a2a"
+                autoCapitalize="none"
+                autoCorrect={false}
+                secureTextEntry
+                returnKeyType="done"
+                onSubmitEditing={saveGatewayToken}
+              />
+              <TouchableOpacity
+                onPress={saveGatewayToken}
+                style={s.configSaveBtn}
+              >
+                <Text
+                  style={[
+                    s.configSaveText,
+                    gatewayTokenSaved && { color: '#00ff88' },
+                  ]}
+                >
+                  {gatewayTokenSaved ? 'saved' : 'save'}
+                </Text>
+              </TouchableOpacity>
+
+              {gatewayTokenConfigured && (
+                <TouchableOpacity
+                  onPress={clearGatewayToken}
+                  style={s.configClearBtn}
+                >
+                  <Text style={s.configClearText}>clear</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+
           <View style={s.configRow}>
             <Text style={s.label}>brave api key</Text>
             <View style={s.configInputRow}>
