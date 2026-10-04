@@ -68,6 +68,7 @@ function orchParams(text, messages, opts = {}) {
     dataSizeBytes: JSON.stringify(messages).length,
     safeMode: opts.safeMode ?? false,
     nodeOnline: opts.nodeOnline ?? true,
+    messageId: opts.messageId ?? 'test_msg_id',
     fetchCredential,
     ...opts,
   };

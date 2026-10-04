@@ -56,6 +56,7 @@ function orchParams(text, messages, opts = {}) {
     onToken: opts.onToken,
     signal: opts.signal,
     conversationId: opts.conversationId,
+    messageId: opts.messageId ?? 'test_msg_id',
     route: opts.route,
     fetchCredential: async () => null,
   };

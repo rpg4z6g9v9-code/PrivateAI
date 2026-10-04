@@ -34,6 +34,7 @@ import { webSearch, type SearchResult } from '@/services/tools/webSearch';
 import { executeSendOrchestration, executeSummarizeOrchestration, detectSearchQuery, formatToolContext } from '@/services/sendOrchestration';
 import type { CredentialFetcher } from '@/services/controlPlane/classifier';
 import { gateSemanticContext } from '@/services/controlPlane/semanticContext';
+import { initRecorder } from '@/services/controlPlane/recorder';
 import { checkPrivateNode, type PrivateNodeStatus } from '@/services/localAI';
 import {
   initConversationDB, persistMessage, loadConversation, clearConversation,
@@ -203,6 +204,8 @@ export default function ChatScreen() {
     (async () => {
       try {
         await initConversationDB();
+        // M3: Initialize Control Plane Recorder (failure → degraded, not blocking)
+        await initRecorder().catch(e => console.warn('[Recorder] init failed (degraded):', e));
         const convoId = await getLatestConversationId();
         setActiveConversationId(convoId);
         const rows = await loadConversation(convoId);
@@ -429,6 +432,7 @@ export default function ChatScreen() {
         onToken: freshStatus.online ? onToken : undefined,
         signal: cancelRef.current!.signal,
         conversationId: activeConversationId,
+        messageId: userMsg.id,
         route: freshStatus.online ? 'local' : 'cloud',
         fetchCredential,
       });

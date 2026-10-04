@@ -17,6 +17,8 @@ import { webSearch, type SearchResult } from '@/services/tools/webSearch';
 import { networkMonitor } from '@/services/networkMonitor';
 import { classifyPayload, classifyData, type PayloadClassification, type CredentialFetcher } from '@/services/controlPlane/classifier';
 import { gateReasoning, gateSearch } from '@/services/controlPlane/interimBoundaryGate';
+import { getSessionId, mintRequestId, mintDecisionId, toConversationRef, toMessageRef } from '@/services/controlPlane/identifiers';
+import { ensureReady, appendRecord } from '@/services/controlPlane/recorder';
 
 // ── Search detection (from original index.tsx) ──────────────────
 
@@ -68,6 +70,7 @@ export interface SendOrchestrationParams {
   onToken?: (token: string) => void;
   signal?: AbortSignal;
   conversationId?: string;
+  messageId?: string;
   route?: string;
   fetchCredential: CredentialFetcher;
 }
@@ -80,6 +83,7 @@ export interface SendOrchestrationResult {
   dataClass: DataClassificationResult;
   payloadClassification: PayloadClassification;
   searchBlocked?: boolean;
+  recorderStatus?: 'recorded' | 'degraded';
   reasoningRefused?: boolean;
 }
 
@@ -90,6 +94,32 @@ export async function executeSendOrchestration(
 ): Promise<SendOrchestrationResult> {
   const { text, messages, dataClass, dataSizeBytes,
           safeMode, nodeOnline, onToken, signal, conversationId, route, fetchCredential } = params;
+
+  // ── M3: Mint identifiers and record user_statement ──
+  const sessionId = getSessionId();
+  const requestId = mintRequestId();
+  const messageRef = params.messageId ? toMessageRef(params.messageId) : null;
+  const convRef = conversationId ? toConversationRef(conversationId) : null;
+  let recorderStatus: 'recorded' | 'degraded' = 'recorded';
+
+  // Await Recorder readiness (shared init, never blocks indefinitely)
+  const ready = await ensureReady();
+  if (!ready) recorderStatus = 'degraded';
+
+  // Record user_statement (failure → degraded, chat continues)
+  const userStmtResult = await appendRecord({
+    record_id: requestId,
+    record_type: 'user_statement',
+    record_kind: 'canonical',
+    session_id: sessionId,
+    conversation_id: convRef,
+    message_id: messageRef,
+    request_id: requestId,
+    timestamp: Date.now(),
+    source: 'send_orchestration',
+    payload: JSON.stringify({ text_length: text.length, message_count: messages.length }),
+  });
+  if (userStmtResult.status === 'degraded') recorderStatus = 'degraded';
 
   // ── M2: Build tool context (KC-5 preserved: tools execute before authorization) ──
   const toolContextParts: string[] = [];
@@ -149,6 +179,29 @@ export async function executeSendOrchestration(
 
   const reasoningGate = gateReasoning(payloadClassification);
 
+  // M3: Record interim gate decision (failure → degraded, chat continues)
+  // record_kind='interim_gate', record_type=null (NOT a canonical Architecture record)
+  const decisionId = mintDecisionId();
+  const gateResult = await appendRecord({
+    record_id: decisionId,
+    record_type: null,
+    record_kind: 'interim_gate',
+    session_id: sessionId,
+    conversation_id: convRef,
+    message_id: messageRef,
+    request_id: requestId,
+    timestamp: Date.now(),
+    source: 'interim_boundary_gate',
+    payload: JSON.stringify({
+      action: reasoningGate.action,
+      is_sensitive: payloadClassification.isSensitive,
+      is_protected: payloadClassification.isProtected,
+      union_classes: payloadClassification.unionClasses,
+      search_blocked: searchBlocked,
+    }),
+  });
+  if (gateResult.status === 'degraded') recorderStatus = 'degraded';
+
   // D7: Protected → refuse entirely, zero engine egress
   if (reasoningGate.action === 'refuse') {
     networkMonitor.logCall({
@@ -167,6 +220,7 @@ export async function executeSendOrchestration(
       dataClass,
       payloadClassification,
       reasoningRefused: true,
+      recorderStatus,
     };
   }
 
@@ -206,6 +260,7 @@ export async function executeSendOrchestration(
     dataClass,
     payloadClassification,
     searchBlocked,
+    recorderStatus,
   };
 }
 
