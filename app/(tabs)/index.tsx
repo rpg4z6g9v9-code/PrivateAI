@@ -31,7 +31,9 @@ import { canAccessVault, unlockVault, lockVault } from '@/services/dataVault';
 import { routeAI } from '@/services/aiRouter';
 import { buildReadOnlyMacToolContext } from '@/services/readOnlyTools';
 import { webSearch, type SearchResult } from '@/services/tools/webSearch';
-import { executeSendOrchestration, detectSearchQuery, formatToolContext } from '@/services/sendOrchestration';
+import { executeSendOrchestration, executeSummarizeOrchestration, detectSearchQuery, formatToolContext } from '@/services/sendOrchestration';
+import type { CredentialFetcher } from '@/services/controlPlane/classifier';
+import { gateSemanticContext } from '@/services/controlPlane/semanticContext';
 import { checkPrivateNode, type PrivateNodeStatus } from '@/services/localAI';
 import {
   initConversationDB, persistMessage, loadConversation, clearConversation,
@@ -375,12 +377,22 @@ export default function ChatScreen() {
       setMessages(newMessages);
       setAttachment(null);
       persistMessage(userMsg, activeConversationId).catch(e => console.warn('[DB] persist user msg failed:', e));
-      embedUserMessage(userMsg.content, userMsg.id, activeConversationId);
 
-      // Semantic retrieval over uploaded notes — runs in parallel with the AI
-      // call below so it never adds latency to the visible response. Best-effort:
-      // an unreachable Ollama host or no embedded notes just resolves to [].
-      const retrievalPromise = findRelevantNodes(text).catch(() => [] as string[]);
+      // M2: Gate embeddings — protected current text must not reach /api/embeddings.
+      const fetchCredentialForEmbed: CredentialFetcher = async (storageType, key) => {
+        if (storageType === 'async') return AsyncStorage.getItem(key);
+        const secureStorage = (await import('@/services/secureStorage')).default;
+        return secureStorage.getItem(key);
+      };
+      const semanticCtx = await gateSemanticContext({
+        text,
+        messageId: userMsg.id,
+        conversationId: activeConversationId,
+        fetchCredential: fetchCredentialForEmbed,
+        embedUserMessage,
+        findRelevantNodes,
+      });
+      const retrievalPromise = semanticCtx.retrievalPromise;
 
       // Streaming placeholder — inserted immediately so the UI shows activity at once.
       // For local route: tokens fill it in real time. For cloud: replaced on completion.
@@ -396,6 +408,13 @@ export default function ChatScreen() {
       };
 
       // ── Production orchestration (extracted to sendOrchestration.ts) ──
+      // M2: credential fetcher for protected-data detection
+      const fetchCredential: CredentialFetcher = async (storageType, key) => {
+        if (storageType === 'async') return AsyncStorage.getItem(key);
+        const secureStorage = (await import('@/services/secureStorage')).default;
+        return secureStorage.getItem(key);
+      };
+
       const orchResult = await executeSendOrchestration({
         text,
         messages: newMessages.map(m => ({
@@ -411,6 +430,7 @@ export default function ChatScreen() {
         signal: cancelRef.current!.signal,
         conversationId: activeConversationId,
         route: freshStatus.online ? 'local' : 'cloud',
+        fetchCredential,
       });
 
       streamingMsgIdRef.current = null;
@@ -505,20 +525,29 @@ export default function ChatScreen() {
         })
         .join('\n\n');
 
-      const toolContext = `Task: summarize the conversation below.\n\nReturn exactly three sections:\nTopics: (main subjects discussed)\nDecisions: (conclusions reached, or "none")\nNext steps: (open items or follow-ups, or "none")\n\nPlain text only. Each section on its own line. No markdown.\n\nConversation:\n${transcript}`;
-
       const freshStatus = await checkPrivateNode();
-      const result = await routeAI({
-        messages: [{ role: 'user', content: 'Summarize the conversation.' }],
-        isSensitive: false,
+
+      // M2: credential fetcher for protected-data detection
+      const fetchCred: CredentialFetcher = async (storageType, key) => {
+        if (storageType === 'async') return AsyncStorage.getItem(key);
+        const secureStorage = (await import('@/services/secureStorage')).default;
+        return secureStorage.getItem(key);
+      };
+
+      const sumResult = await executeSummarizeOrchestration({
+        transcript,
         safeMode,
         nodeOnline: freshStatus.online,
-        toolContext,
+        fetchCredential: fetchCred,
       });
 
-      setSummaryText(sanitizeOutput(result.text));
-      setSummaryRoute({ via: result.route, latency: result.latency });
-      setShowSummary(true);
+      if (sumResult.reasoningRefused) {
+        Alert.alert('Summarize blocked', sumResult.reply);
+      } else {
+        setSummaryText(sumResult.reply);
+        setSummaryRoute({ via: sumResult.result.route, latency: sumResult.result.latency });
+        setShowSummary(true);
+      }
     } catch (e) {
       Alert.alert('Summarize failed', 'Could not generate summary.');
     } finally {

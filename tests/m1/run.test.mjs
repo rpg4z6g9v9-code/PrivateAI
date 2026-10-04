@@ -368,14 +368,14 @@ describe('D — Schema imports no runtime modules', () => {
     });
   }
 
-  it('no production runtime module imports controlPlane', () => {
-    const runtimeFiles = [
+  it('core runtime modules do not import controlPlane (sendOrchestration is authorized M2 consumer)', () => {
+    const coreRuntime = [
       'services/aiRouter.ts', 'services/providerGateway.ts', 'services/readOnlyTools.ts',
-      'services/securityGateway.ts', 'services/localAI.ts', 'services/sendOrchestration.ts',
+      'services/securityGateway.ts', 'services/localAI.ts',
       'services/networkMonitor.ts', 'services/toolDB.ts', 'services/conversationDB.ts',
       'services/connectivityChecker.ts',
     ];
-    for (const f of runtimeFiles) {
+    for (const f of coreRuntime) {
       const src = readFileSync(f, 'utf8');
       assert.ok(!src.includes('controlPlane'), `${f} must not import controlPlane`);
     }
