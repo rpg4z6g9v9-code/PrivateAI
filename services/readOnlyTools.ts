@@ -1,4 +1,5 @@
 import { providerGatewayFetch } from './providerGateway';
+import { gatewayToolCapabilityId, checkCapabilityOrDeny } from './controlPlane/registry';
 
 export type ReadOnlyMacTool =
   | 'ollama.status'
@@ -311,6 +312,13 @@ async function runTool(
   tool: ReadOnlyMacTool,
   timeoutMs = tool.startsWith('github.') ? 15000 : 7000
 ): Promise<ToolRunResponse> {
+  // M4: registry check — deny before contacting gateway
+  const capId = gatewayToolCapabilityId(tool);
+  const allowed = await checkCapabilityOrDeny(capId ?? tool);
+  if (!allowed.allowed) {
+    return { tool, error: `registry_denied: ${capId ?? 'unregistered_capability'}` };
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 

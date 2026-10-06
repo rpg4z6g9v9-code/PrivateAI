@@ -14,10 +14,10 @@
  *   - Parse error             → degraded
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getBraveApiKeySecure, setBraveApiKeySecure, clearBraveApiKeySecure, type BraveKeySetResult, type BraveKeyClearResult } from '../controlPlane/braveKeyMigration';
 import { initToolDB, logToolStart, logToolComplete, logToolFail } from '../toolDB';
+import { checkCapabilityOrDeny } from '../controlPlane/registry';
 
-const API_KEY_STORAGE = 'brave_search_api_key_v1';
 const BRAVE_ENDPOINT = 'https://api.search.brave.com/res/v1/web/search';
 const TIMEOUT_MS = 10_000;
 
@@ -61,18 +61,35 @@ export function updateWebSearchStatus(status: WebSearchStatus): void {
 
 // ── API key management ────────────────────────────────────────
 
+/** Read Brave API key — secureStorage first (D4), legacy AsyncStorage fallback. */
 export async function getBraveApiKey(): Promise<string> {
-  return (await AsyncStorage.getItem(API_KEY_STORAGE)) ?? '';
+  return getBraveApiKeySecure();
 }
 
-export async function setBraveApiKey(key: string): Promise<void> {
-  await AsyncStorage.setItem(API_KEY_STORAGE, key.trim());
-  _sessionStatus = key.trim().length > 0 ? 'configured' : 'unavailable';
+export async function setBraveApiKey(key: string): Promise<BraveKeySetResult> {
+  const result = await setBraveApiKeySecure(key.trim());
+  if (result.stored) {
+    // New key written — runtime is configured regardless of legacy cleanup outcome
+    _sessionStatus = 'configured';
+  } else {
+    // Write failed — a prior secure credential may still be present and usable.
+    // Re-check actual availability rather than claiming unavailable unconditionally.
+    const keyPresent = (await getBraveApiKeySecure()).length > 0;
+    _sessionStatus = keyPresent ? 'configured' : 'unavailable';
+  }
+  return result;
 }
 
-export async function clearBraveApiKey(): Promise<void> {
-  await AsyncStorage.removeItem(API_KEY_STORAGE);
-  _sessionStatus = 'unavailable';
+export async function clearBraveApiKey(): Promise<BraveKeyClearResult> {
+  const result = await clearBraveApiKeySecure();
+  if (result.secureCleared && result.legacyCleared) {
+    _sessionStatus = 'unavailable';
+  } else {
+    // Partial clear — re-check actual key availability rather than claiming unavailable
+    const keyPresent = (await getBraveApiKeySecure()).length > 0;
+    _sessionStatus = keyPresent ? 'configured' : 'unavailable';
+  }
+  return result;
 }
 
 // ── Executor ──────────────────────────────────────────────────
@@ -85,6 +102,18 @@ export async function webSearch(
     route?: string | null;
   } = {}
 ): Promise<SearchResponse> {
+  // M4: registry check — deny before execution if capability not registered/executable
+  const allowed = await checkCapabilityOrDeny('web.search', opts.conversationId ?? null);
+  if (!allowed.allowed) {
+    return {
+      query,
+      results: [],
+      duration_ms: 0,
+      callId: `denied_${Date.now()}`,
+      error: 'web.search: capability_denied by registry',
+    };
+  }
+
   await initToolDB();
 
   const callId = `tool_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -100,7 +129,7 @@ export async function webSearch(
     route: opts.route ?? null,
   });
 
-  const apiKey = await getBraveApiKey();
+  const apiKey = await getBraveApiKeySecure();
   if (!apiKey) {
     _sessionStatus = 'unavailable';
     const msg = 'no API key configured';

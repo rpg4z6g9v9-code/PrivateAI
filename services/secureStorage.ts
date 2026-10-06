@@ -29,6 +29,22 @@ const secureStorage = {
       await EncryptedStorage.removeItem(key);
     } catch (e) { console.warn('[Storage] removeItem failed:', e); }
   },
+
+  /**
+   * Attempt to remove a key and return whether the removal succeeded.
+   * Returns true if EncryptedStorage.removeItem completed without error.
+   * Returns false (and logs non-secret failure) if it threw.
+   * Never exposes the key value in logs.
+   */
+  async removeItemWithStatus(key: string): Promise<boolean> {
+    try {
+      await EncryptedStorage.removeItem(key);
+      return true;
+    } catch (e) {
+      console.warn('[Storage] removeItem failed:', e);
+      return false;
+    }
+  },
 };
 
 export default secureStorage;

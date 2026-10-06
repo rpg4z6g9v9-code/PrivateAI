@@ -368,9 +368,11 @@ describe('D — Schema imports no runtime modules', () => {
     });
   }
 
-  it('core runtime modules do not import controlPlane (sendOrchestration is authorized M2 consumer)', () => {
+  it('core runtime modules do not import controlPlane (M2 authorized: sendOrchestration; M4 authorized: aiRouter, readOnlyTools, embeddingService, webSearch)', () => {
+    // M4 registry check is authorized for call-site modules.
+    // Remaining modules must still not import controlPlane.
     const coreRuntime = [
-      'services/aiRouter.ts', 'services/providerGateway.ts', 'services/readOnlyTools.ts',
+      'services/providerGateway.ts',
       'services/securityGateway.ts', 'services/localAI.ts',
       'services/networkMonitor.ts', 'services/toolDB.ts', 'services/conversationDB.ts',
       'services/connectivityChecker.ts',

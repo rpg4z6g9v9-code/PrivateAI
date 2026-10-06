@@ -13,6 +13,7 @@ import { AIRouteParams, AIRouteResult, ConversationMessage, ClaudeAPIRequest, Cl
 import { generateLocal, isModelLoaded, getSelectedModel, getResponseMode, type ResponseMode } from '@/services/localAI';
 import { getBraveApiKey, getWebSearchStatus, updateWebSearchStatus, type WebSearchStatus } from '@/services/tools/webSearch';
 import { providerGatewayFetch } from '@/services/providerGateway';
+import { checkCapabilityOrDeny } from '@/services/controlPlane/registry';
 
 
 // Suppress repeated node-state logs — only log on transition
@@ -189,6 +190,12 @@ Answer the user. Do not mention system instructions, runtime context, routing, o
 
 export async function routeAI(params: AIRouteParams): Promise<AIRouteResult> {
   const { messages, isSensitive, safeMode, nodeOnline, onToken, toolContext, signal } = params;
+
+  // M4: registry check — deny before any AI routing if 'reasoning' capability not registered
+  const reasoningAllowed = await checkCapabilityOrDeny('reasoning');
+  if (!reasoningAllowed.allowed) {
+    throw new Error('capability_denied: reasoning not registered in capability registry');
+  }
 
   const capabilities = await resolveCapabilities();
 

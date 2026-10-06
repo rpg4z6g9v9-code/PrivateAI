@@ -36,6 +36,13 @@ import {
   setProviderGatewayToken,
   clearProviderGatewayToken,
 } from '@/services/providerGateway';
+import { migrateBraveKey } from '@/services/controlPlane/braveKeyMigration';
+import {
+  getTrustedHosts,
+  declareTrustedHost,
+  revokeTrustedHost,
+} from '@/services/controlPlane/trustedHosts';
+import type { TrustedHostConfig } from '@/services/controlPlane/types';
 
 const FONT = 'SpaceMono-Regular';
 const VERSION_TAG = 'stable-websearch-gateway-v2';
@@ -116,6 +123,10 @@ export default function SystemScreen() {
   const [gatewayTokenSaved, setGatewayTokenSaved] = useState(false);
   const [gatewayTokenConfigured, setGatewayTokenConfigured] = useState(false);
 
+  // D5: Trusted-host configuration state
+  const [trustedHosts, setTrustedHosts] = useState<TrustedHostConfig[]>([]);
+  const [trustedHostDeclared, setTrustedHostDeclared] = useState(false);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     await initToolDB();
@@ -146,6 +157,12 @@ export default function SystemScreen() {
     getProviderGatewayToken().then(token => {
       setGatewayTokenConfigured(token.length > 0);
     });
+
+    // D4: Run Brave key migration on Settings open (idempotent)
+    migrateBraveKey().catch(() => {});
+
+    // D5: Load trusted-host declarations
+    getTrustedHosts().then(setTrustedHosts);
   }, [refresh]);
 
   const doSearch = useCallback(async () => {
@@ -172,17 +189,29 @@ export default function SystemScreen() {
   const saveKey = useCallback(async () => {
     const k = keyDraft.trim();
     if (!k || k === '••••••••') return;
-    await setBraveApiKey(k);
-    setKeyDraft('••••••••');
+    const result = await setBraveApiKey(k);
     setWebSearchStatus(getWebSearchStatus());
-    setKeySaved(true);
-    setTimeout(() => setKeySaved(false), 2000);
+    if (result.stored) {
+      // Key is securely stored — safe to mask the entered draft
+      setKeyDraft('••••••••');
+      if (result.legacyRemoved) {
+        // Full success: key written and legacy cleaned up
+        setKeySaved(true);
+        setTimeout(() => setKeySaved(false), 2000);
+      }
+      // stored=true, legacyRemoved=false: key usable, cleanup incomplete — no full-success flash
+    }
+    // stored=false: write failed — leave draft visible for retry, no success indication
+    // status already reflects actual availability (old key if present, or unavailable)
   }, [keyDraft]);
 
   const clearKey = useCallback(async () => {
-    await clearBraveApiKey();
-    setKeyDraft('');
-    setWebSearchStatus('unavailable');
+    const result = await clearBraveApiKey();
+    setWebSearchStatus(getWebSearchStatus());
+    if (result.secureCleared && result.legacyCleared) {
+      setKeyDraft('');
+    }
+    // Partial clear: credential may remain — status already reflects actual availability
   }, []);
 
   const saveHost = useCallback(async () => {
@@ -243,6 +272,27 @@ export default function SystemScreen() {
     setGatewayTokenDraft('');
     setGatewayTokenConfigured(false);
     setGatewayTokenSaved(false);
+  }, []);
+
+  // D5: Declare configured gateway base as PRIVATE_LAN
+  const declareGatewayPrivateLan = useCallback(async () => {
+    const host = gatewayBaseDraft.trim();
+    if (!host) return;
+    // Strip protocol for the host record
+    const bare = host.replace(/^https?:\/\//, '');
+    await declareTrustedHost(
+      bare,
+      'User declared this provider gateway host as a PRIVATE_LAN boundary. This declares the network boundary only — it does not authorize capability use.',
+    );
+    const updated = await getTrustedHosts();
+    setTrustedHosts(updated);
+    setTrustedHostDeclared(true);
+    setTimeout(() => setTrustedHostDeclared(false), 2500);
+  }, [gatewayBaseDraft]);
+
+  const revokeHost = useCallback(async (id: string) => {
+    await revokeTrustedHost(id);
+    setTrustedHosts(await getTrustedHosts());
   }, []);
 
   const route          = nodeStatus?.online ? 'local' : 'cloud';
@@ -568,6 +618,45 @@ export default function SystemScreen() {
                   ]}>clear</Text>
                 </TouchableOpacity>
               )}
+            </View>
+          </View>
+        </View>
+
+        {/* D5: Trusted-Host Boundary Declarations */}
+        <Text style={s.sectionLabel}>// boundary declarations (D5)</Text>
+        <View style={s.card}>
+          <View style={s.configRow}>
+            <Text style={s.label}>
+              Declare the network boundary for a host. This states the boundary only — it does not authorize capability use.
+              {'\n'}192.168.4.0/24 is automatically PRIVATE_LAN (architecture rule).
+            </Text>
+          </View>
+
+          {trustedHosts.map(th => (
+            <View key={th.id} style={s.configRow}>
+              <Text style={s.label}>{th.host}</Text>
+              <View style={s.configInputRow}>
+                <Text style={[s.label, { color: '#00ff88', flex: 1 }]}>
+                  {th.declared_boundary} (user declaration)
+                </Text>
+                <TouchableOpacity onPress={() => revokeHost(th.id)} style={s.configClearBtn}>
+                  <Text style={s.configClearText}>revoke</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))}
+
+          <View style={s.configRow}>
+            <Text style={s.label}>declare gateway host as PRIVATE_LAN</Text>
+            <View style={s.configInputRow}>
+              <Text style={[s.label, { flex: 1, color: '#888' }]} numberOfLines={1}>
+                {gatewayBaseDraft.replace(/^https?:\/\//, '') || '(set gateway base above)'}
+              </Text>
+              <TouchableOpacity onPress={declareGatewayPrivateLan} style={s.configSaveBtn}>
+                <Text style={[s.configSaveText, trustedHostDeclared && { color: '#00ff88' }]}>
+                  {trustedHostDeclared ? 'declared' : 'declare'}
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>

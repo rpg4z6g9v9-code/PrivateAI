@@ -12,6 +12,7 @@
 import { getOllamaHost } from '@/services/localAI';
 import { storeEmbedding, getAllEmbeddings, getConversations } from '@/services/conversationDB';
 import type { ConversationSummary } from '@/services/conversationDB';
+import { checkCapabilityOrDeny } from '@/services/controlPlane/registry';
 
 const EMBED_MODEL = 'nomic-embed-text:latest';
 const DEFAULT_TOP_K = 10;
@@ -24,6 +25,10 @@ const MIN_SCORE = 0.3; // discard results below this threshold
  * Returns null if the node is offline or the request fails.
  */
 export async function embedText(text: string): Promise<number[] | null> {
+  // M4: registry check — deny before contacting Ollama embeddings endpoint
+  const allowed = await checkCapabilityOrDeny('retrieval.embed');
+  if (!allowed.allowed) return null;
+
   try {
     const host = await getOllamaHost();
     const response = await fetch(`http://${host}/api/embeddings`, {
