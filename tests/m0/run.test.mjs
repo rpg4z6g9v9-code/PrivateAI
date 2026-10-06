@@ -352,7 +352,7 @@ describe('R8 — Re-entered assistant history cannot affect deterministic tool s
   it('tool selection uses only current user text, not history', () => {
     assert.ok(SRC_READONLY.includes('function detectTools(text: string)'));
     assert.ok(SRC_READONLY.includes('function buildReadOnlyMacToolContext(\n  userText: string'));
-    assert.ok(SRC_ORCH.includes('buildReadOnlyMacToolContext(text)'));
+    assert.ok(SRC_ORCH.includes('buildReadOnlyMacToolContext(text,'));
   });
 
   it('classification uses only current user text, not history', () => {
@@ -588,7 +588,7 @@ describe('KC-5 UNCHANGED — Tools execute before authorization (transitional)',
   });
 
   it('structural: ordering in orchestration source', () => {
-    const macToolLine = SRC_ORCH.indexOf('buildReadOnlyMacToolContext(text)');
+    const macToolLine = SRC_ORCH.indexOf('buildReadOnlyMacToolContext(text,');
     const routeAILine = SRC_ORCH.indexOf('routeAI(routeParams)');
     assert.ok(macToolLine > 0 && macToolLine < routeAILine, 'Mac tools before routeAI');
     const embeddingLine = SRC_INDEX.indexOf('findRelevantNodes(text)');

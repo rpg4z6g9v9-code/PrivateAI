@@ -72,6 +72,7 @@ export interface SendOrchestrationParams {
   conversationId?: string;
   messageId?: string;
   route?: string;
+  requestId?: string;
   fetchCredential: CredentialFetcher;
 }
 
@@ -96,8 +97,9 @@ export async function executeSendOrchestration(
           safeMode, nodeOnline, onToken, signal, conversationId, route, fetchCredential } = params;
 
   // ── M3: Mint identifiers and record user_statement ──
+  // L6: use caller-supplied requestId (minted at user-action boundary) or mint here as fallback.
   const sessionId = getSessionId();
-  const requestId = mintRequestId();
+  const requestId = params.requestId ?? mintRequestId();
   const messageRef = params.messageId ? toMessageRef(params.messageId) : null;
   const convRef = conversationId ? toConversationRef(conversationId) : null;
   let recorderStatus: 'recorded' | 'degraded' = 'recorded';
@@ -124,7 +126,17 @@ export async function executeSendOrchestration(
   // ── M2: Build tool context (KC-5 preserved: tools execute before authorization) ──
   const toolContextParts: string[] = [];
 
-  const macToolContext = await buildReadOnlyMacToolContext(text);
+  // L2: compute one upfront M2 classification for mac tools so data_classes are M2-exact.
+  const upfrontClassification = await classifyPayload({
+    currentText: text,
+    messages: [],
+    fetchCredential,
+  });
+
+  const macToolContext = await buildReadOnlyMacToolContext(text, {
+    requestId,
+    dataClasses: upfrontClassification.unionClasses,
+  });
   if (macToolContext) {
     toolContextParts.push(macToolContext);
   }
@@ -149,7 +161,9 @@ export async function executeSendOrchestration(
     } else {
       const searchRes = await webSearch(searchQuery, {
         conversationId: conversationId ?? null,
-        route: route ?? null,
+        route:          route ?? null,
+        requestId:      requestId,
+        dataClasses:    preSearchClassification.unionClasses,
       });
       toolContextParts.push(formatToolContext(searchRes.results, searchRes.query, searchRes.error));
     }
@@ -232,12 +246,15 @@ export async function executeSendOrchestration(
   // Route to AI
   const routeParams = {
     messages,
-    isSensitive: effectiveIsSensitive,
+    isSensitive:    effectiveIsSensitive,
     safeMode,
     nodeOnline,
     onToken,
     toolContext,
     signal,
+    requestId,
+    conversationId,
+    dataClasses:    payloadClassification.unionClasses,
   };
   const result = await routeAI(routeParams);
 
@@ -270,6 +287,7 @@ export interface SummarizeOrchestrationParams {
   transcript: string;
   safeMode: boolean;
   nodeOnline: boolean;
+  requestId?: string;
   fetchCredential: CredentialFetcher;
 }
 
@@ -284,6 +302,8 @@ export async function executeSummarizeOrchestration(
   params: SummarizeOrchestrationParams
 ): Promise<SummarizeOrchestrationResult> {
   const { transcript, safeMode, nodeOnline, fetchCredential } = params;
+  // L6: mint requestId at summarize action boundary (use caller-supplied or mint here).
+  const summarizeRequestId = params.requestId ?? mintRequestId();
 
   // Injection check on transcript (M2: summarize now uses injection check)
   const injCheck = checkInjection(transcript);
@@ -325,6 +345,8 @@ export async function executeSummarizeOrchestration(
     safeMode,
     nodeOnline,
     toolContext,
+    requestId:   summarizeRequestId,
+    dataClasses: classification.unionClasses,
   });
 
   const reply = sanitizeOutput(result.text);

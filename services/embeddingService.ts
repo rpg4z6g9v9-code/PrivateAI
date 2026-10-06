@@ -13,6 +13,8 @@ import { getOllamaHost } from '@/services/localAI';
 import { storeEmbedding, getAllEmbeddings, getConversations } from '@/services/conversationDB';
 import type { ConversationSummary } from '@/services/conversationDB';
 import { checkCapabilityOrDeny } from '@/services/controlPlane/registry';
+import { resolveAndRecordShadow, recordShadowComparison } from '@/services/controlPlane/candidateResolution';
+import type { DataClass } from '@/services/controlPlane/types';
 
 const EMBED_MODEL = 'nomic-embed-text:latest';
 const DEFAULT_TOP_K = 10;
@@ -24,13 +26,23 @@ const MIN_SCORE = 0.3; // discard results below this threshold
  * Generate a single embedding vector via nomic-embed-text on Mac Mini.
  * Returns null if the node is offline or the request fails.
  */
-export async function embedText(text: string): Promise<number[] | null> {
+export async function embedText(text: string, requestId?: string, dataClasses?: DataClass[]): Promise<number[] | null> {
   // M4: registry check — deny before contacting Ollama embeddings endpoint
   const allowed = await checkCapabilityOrDeny('retrieval.embed');
   if (!allowed.allowed) return null;
 
   try {
     const host = await getOllamaHost();
+
+    // M5 L1: AWAIT shadow candidate resolution before execution — append attempt completes first.
+    // data_classes from caller (M2 PayloadClassification.unionClasses); default to ['public'].
+    const shadowResolution = await resolveAndRecordShadow({
+      capability_id: 'retrieval.embed',
+      ollama_host:   host,
+      data_classes:  dataClasses ?? ['public'],
+      request_id:    requestId ?? null,
+    }).catch(() => null);
+
     const response = await fetch(`http://${host}/api/embeddings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -40,6 +52,12 @@ export async function embedText(text: string): Promise<number[] | null> {
     const json = await response.json();
     const embedding = json.embedding;
     if (!Array.isArray(embedding) || embedding.length === 0) return null;
+
+    // M5 L4: append-only shadow comparison after successful embedding
+    if (shadowResolution) {
+      await recordShadowComparison(shadowResolution, 'ollama_embed_resolver', null).catch(() => {});
+    }
+
     return embedding as number[];
   } catch {
     return null;
@@ -82,11 +100,13 @@ export function embedUserMessage(
   content: string,
   messageId: string,
   conversationId: string,
+  requestId?: string,
+  dataClasses?: DataClass[],
 ): void {
   // Intentionally not awaited — must never block the send flow
   (async () => {
     try {
-      const embedding = await embedText(content);
+      const embedding = await embedText(content, requestId, dataClasses);
       if (!embedding) return;
       await storeEmbedding(messageId, conversationId, embedding);
     } catch {
@@ -110,12 +130,14 @@ export function embedUserMessage(
  */
 export async function semanticSearchConversations(
   query: string,
+  requestId?: string,
+  dataClasses?: DataClass[],
   topK: number = DEFAULT_TOP_K,
 ): Promise<ConversationSummary[] | null> {
   if (!query.trim()) return null;
 
-  // 1. Embed the query
-  const queryVec = await embedText(query.trim());
+  // 1. Embed the query — thread caller-supplied request identity and M2 classes.
+  const queryVec = await embedText(query.trim(), requestId, dataClasses);
   if (!queryVec) return null;
 
   // 2. Load all stored embeddings

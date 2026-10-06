@@ -32,9 +32,10 @@ import { routeAI } from '@/services/aiRouter';
 import { buildReadOnlyMacToolContext } from '@/services/readOnlyTools';
 import { webSearch, type SearchResult } from '@/services/tools/webSearch';
 import { executeSendOrchestration, executeSummarizeOrchestration, detectSearchQuery, formatToolContext } from '@/services/sendOrchestration';
-import type { CredentialFetcher } from '@/services/controlPlane/classifier';
+import { classifyPayload, type CredentialFetcher } from '@/services/controlPlane/classifier';
 import { gateSemanticContext } from '@/services/controlPlane/semanticContext';
 import { initRecorder } from '@/services/controlPlane/recorder';
+import { mintRequestId } from '@/services/controlPlane/identifiers';
 import { checkPrivateNode, type PrivateNodeStatus } from '@/services/localAI';
 import {
   initConversationDB, persistMessage, loadConversation, clearConversation,
@@ -381,6 +382,9 @@ export default function ChatScreen() {
       setAttachment(null);
       persistMessage(userMsg, activeConversationId).catch(e => console.warn('[DB] persist user msg failed:', e));
 
+      // L6: mint ONE requestId at the user-action boundary BEFORE any M5 shadow call sites.
+      const requestId = mintRequestId();
+
       // M2: Gate embeddings — protected current text must not reach /api/embeddings.
       const fetchCredentialForEmbed: CredentialFetcher = async (storageType, key) => {
         if (storageType === 'async') return AsyncStorage.getItem(key);
@@ -391,6 +395,7 @@ export default function ChatScreen() {
         text,
         messageId: userMsg.id,
         conversationId: activeConversationId,
+        requestId,
         fetchCredential: fetchCredentialForEmbed,
         embedUserMessage,
         findRelevantNodes,
@@ -434,6 +439,7 @@ export default function ChatScreen() {
         conversationId: activeConversationId,
         messageId: userMsg.id,
         route: freshStatus.online ? 'local' : 'cloud',
+        requestId,
         fetchCredential,
       });
 
@@ -538,10 +544,14 @@ export default function ChatScreen() {
         return secureStorage.getItem(key);
       };
 
+      // L6: mint ONE requestId at the summarize user-action boundary.
+      const summarizeRequestId = mintRequestId();
+
       const sumResult = await executeSummarizeOrchestration({
         transcript,
         safeMode,
         nodeOnline: freshStatus.online,
+        requestId: summarizeRequestId,
         fetchCredential: fetchCred,
       });
 
@@ -614,10 +624,25 @@ export default function ChatScreen() {
   const handleHistorySearch = async (q: string) => {
     setHistoryQuery(q);
     try {
-      // Try semantic search first; fall back to SQL LIKE if offline or no embeddings
-      const semantic = q.trim() ? await semanticSearchConversations(q) : null;
-      const list = semantic ?? await searchConversations(q);
-      setHistoryList(list);
+      if (q.trim()) {
+        // L6: mint requestId at the history-search user-action boundary.
+        const requestId = mintRequestId();
+        const fetchCred: CredentialFetcher = async (storageType, key) => {
+          if (storageType === 'async') return AsyncStorage.getItem(key);
+          const secureStorage = (await import('@/services/secureStorage')).default;
+          return secureStorage.getItem(key);
+        };
+        // L2: classify the actual search text via M2; never default to ['public'].
+        const classification = await classifyPayload({ currentText: q, messages: [], fetchCredential: fetchCred });
+        // M2 containment: protected search text skips semantic embedding (no new egress).
+        const semantic = classification.isProtected
+          ? null
+          : await semanticSearchConversations(q, requestId, classification.unionClasses);
+        const list = semantic ?? await searchConversations(q);
+        setHistoryList(list);
+      } else {
+        setHistoryList(await searchConversations(q));
+      }
     } catch (e) {
       console.warn('[DB] searchConversations failed:', e);
     }
@@ -787,16 +812,28 @@ export default function ChatScreen() {
         return;
       }
 
+      // L6: one requestId for the entire upload action; shared across all files in the batch.
+      const uploadRequestId = mintRequestId();
+      const uploadFetchCred: CredentialFetcher = async (storageType, key) => {
+        if (storageType === 'async') return AsyncStorage.getItem(key);
+        const secureStorage = (await import('@/services/secureStorage')).default;
+        return secureStorage.getItem(key);
+      };
+
       const newNodes = await Promise.all(
         validAssets.map(async asset => {
           const content = await readAssetContent(asset);
           // id = filename, so re-uploading the same file overwrites its old node
           // (via the dedupe below) instead of appending a duplicate.
           const node = parseFileToNode(asset.name, content, asset.name);
+          // L2: classify each file's content via M2; respect protected containment.
+          const nodeClass = await classifyPayload({ currentText: node.p, messages: [], fetchCredential: uploadFetchCred });
+          // M2 containment: protected content is not embedded (no new egress).
+          if (nodeClass.isProtected) return node;
           // Embed once, at upload time — not on every graph render. Best-effort:
           // an unreachable Ollama host just leaves this node without an
           // embedding, so it's silently skipped by retrieval later.
-          const embedding = await embedText(node.p);
+          const embedding = await embedText(node.p, uploadRequestId, nodeClass.unionClasses);
           return embedding ? { ...node, embedding } : node;
         })
       );

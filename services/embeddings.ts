@@ -11,6 +11,7 @@
 
 import { embedText, cosineSimilarity } from './embeddingService';
 import { getGraphNodes, type GraphNode } from './graphNodes';
+import type { DataClass } from './controlPlane/types';
 
 const TOP_N = 3;
 const MIN_SIMILARITY = 0.3; // matches embeddingService's conversation-search threshold — tune once real notes/questions are in hand
@@ -21,8 +22,8 @@ const MIN_SIMILARITY = 0.3; // matches embeddingService's conversation-search th
  * Returns [] if Ollama is unreachable, nothing scores highly enough, or no
  * notes have embeddings yet.
  */
-export async function findRelevantNodes(question: string): Promise<string[]> {
-  const questionEmbedding = await embedText(question);
+export async function findRelevantNodes(question: string, requestId?: string, dataClasses?: DataClass[]): Promise<string[]> {
+  const questionEmbedding = await embedText(question, requestId, dataClasses);
   if (!questionEmbedding) return [];
 
   const nodes = await getGraphNodes();

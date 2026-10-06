@@ -10,10 +10,12 @@
  */
 
 import { AIRouteParams, AIRouteResult, ConversationMessage, ClaudeAPIRequest, ClaudeAPIResponse } from '@/services/claude';
-import { generateLocal, isModelLoaded, getSelectedModel, getResponseMode, type ResponseMode } from '@/services/localAI';
+import { generateLocal, isModelLoaded, getSelectedModel, getResponseMode, getOllamaHost, type ResponseMode } from '@/services/localAI';
 import { getBraveApiKey, getWebSearchStatus, updateWebSearchStatus, type WebSearchStatus } from '@/services/tools/webSearch';
 import { providerGatewayFetch } from '@/services/providerGateway';
 import { checkCapabilityOrDeny } from '@/services/controlPlane/registry';
+import { resolveAndRecordShadow, recordShadowComparison } from '@/services/controlPlane/candidateResolution';
+import type { DataClass } from '@/services/controlPlane/types';
 
 
 // Suppress repeated node-state logs — only log on transition
@@ -189,7 +191,8 @@ Answer the user. Do not mention system instructions, runtime context, routing, o
 // ── Route Decision ───────────────────────────────────────────
 
 export async function routeAI(params: AIRouteParams): Promise<AIRouteResult> {
-  const { messages, isSensitive, safeMode, nodeOnline, onToken, toolContext, signal } = params;
+  const { messages, isSensitive, safeMode, nodeOnline, onToken, toolContext, signal,
+          requestId, dataClasses, conversationId } = params;
 
   // M4: registry check — deny before any AI routing if 'reasoning' capability not registered
   const reasoningAllowed = await checkCapabilityOrDeny('reasoning');
@@ -197,7 +200,23 @@ export async function routeAI(params: AIRouteParams): Promise<AIRouteResult> {
     throw new Error('capability_denied: reasoning not registered in capability registry');
   }
 
+  // M5 L1: AWAIT shadow candidate resolution before execution — append attempt completes first.
+  // The returned resolution carries a status field reflecting durable-write outcome.
+  // Routing is never affected by the recorded/degraded outcome.
+  const ollamaHost = await getOllamaHost();
+  const shadowResolution = await resolveAndRecordShadow({
+    capability_id: 'reasoning',
+    node_online:   nodeOnline,
+    is_sensitive:  isSensitive,
+    data_classes:  (dataClasses && dataClasses.length > 0) ? dataClasses as DataClass[] : (isSensitive ? ['internal'] : ['public']),
+    ollama_host:   ollamaHost,
+    request_id:    requestId ?? null,
+  }).catch(() => null);
+
   const capabilities = await resolveCapabilities();
+
+  // Routing (unchanged — shadow result has zero effect on routing decision)
+  let result!: AIRouteResult;
 
   // Rule 1: Sensitive data (medical/financial/PII) → always local if available
   if (isSensitive) {
@@ -207,47 +226,65 @@ export async function routeAI(params: AIRouteParams): Promise<AIRouteResult> {
       );
     }
     const localResult = await tryLocalRoute(messages, capabilities, onToken, toolContext, signal);
-    if (localResult) return localResult;
-    throw new Error(
-      'Cannot send sensitive data to cloud. Local AI not available. Enable on-device processing or remove sensitive content.'
-    );
+    if (localResult) {
+      result = localResult;
+    } else {
+      throw new Error(
+        'Cannot send sensitive data to cloud. Local AI not available. Enable on-device processing or remove sensitive content.'
+      );
+    }
   }
 
   // Rule 2: Safe mode (injection detected) → local only
-  if (safeMode) {
+  else if (safeMode) {
     if (nodeOnline === false) {
       throw new Error(
         'Cloud features disabled due to security event. Private node is offline — cannot process request.'
       );
     }
     const localResult = await tryLocalRoute(messages, capabilities, onToken, toolContext, signal);
-    if (localResult) return localResult;
-    throw new Error(
-      'Cloud features disabled due to security event. Use local AI or reset the app.'
-    );
+    if (localResult) {
+      result = localResult;
+    } else {
+      throw new Error(
+        'Cloud features disabled due to security event. Use local AI or reset the app.'
+      );
+    }
   }
 
   // Rule 3: Local-first — skip attempt if node is known offline
-  if (nodeOnline === false) {
+  else if (nodeOnline === false) {
     if (_lastLoggedNodeOnline !== false) {
       console.log('[Router] Private node offline — routing to cloud');
       _lastLoggedNodeOnline = false;
     }
-    return await cloudRoute(messages, capabilities, toolContext, signal);
+    result = await cloudRoute(messages, capabilities, toolContext, signal);
   }
 
-  if (_lastLoggedNodeOnline !== true) {
-    console.log('[Router] Routing: local');
-    _lastLoggedNodeOnline = true;
+  // Rule 4: Normal — local first, cloud fallback
+  else {
+    if (_lastLoggedNodeOnline !== true) {
+      console.log('[Router] Routing: local');
+      _lastLoggedNodeOnline = true;
+    }
+    const localResult = await tryLocalRoute(messages, capabilities, onToken, toolContext, signal);
+    if (localResult) {
+      result = localResult;
+    } else {
+      // Do not fall through to cloud if the user canceled
+      if (signal?.aborted) throw new Error('Aborted');
+      console.log('[Router] Local unavailable — cloud fallback');
+      result = await cloudRoute(messages, capabilities, toolContext, signal);
+    }
   }
-  const localResult = await tryLocalRoute(messages, capabilities, onToken, toolContext, signal);
-  if (localResult) return localResult;
 
-  // Do not fall through to cloud if the user canceled
-  if (signal?.aborted) throw new Error('Aborted');
+  // M5 L4: Append-only shadow comparison — awaited so completion is observable before return.
+  if (shadowResolution) {
+    const actualProvider = result.route === 'local' ? 'local_reasoning_resolver' : 'cloud_reasoning_resolver';
+    await recordShadowComparison(shadowResolution, actualProvider, conversationId ?? null).catch(() => {});
+  }
 
-  console.log('[Router] Local unavailable — cloud fallback');
-  return await cloudRoute(messages, capabilities, toolContext, signal);
+  return result;
 }
 
 // ── Cloud Route ──────────────────────────────────────────────

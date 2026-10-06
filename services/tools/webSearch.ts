@@ -17,6 +17,8 @@
 import { getBraveApiKeySecure, setBraveApiKeySecure, clearBraveApiKeySecure, type BraveKeySetResult, type BraveKeyClearResult } from '../controlPlane/braveKeyMigration';
 import { initToolDB, logToolStart, logToolComplete, logToolFail } from '../toolDB';
 import { checkCapabilityOrDeny } from '../controlPlane/registry';
+import { resolveAndRecordShadow, recordShadowComparison } from '../controlPlane/candidateResolution';
+import type { DataClass } from '../controlPlane/types';
 
 const BRAVE_ENDPOINT = 'https://api.search.brave.com/res/v1/web/search';
 const TIMEOUT_MS = 10_000;
@@ -100,6 +102,8 @@ export async function webSearch(
     conversationId?: string | null;
     model?: string | null;
     route?: string | null;
+    requestId?: string | null;
+    dataClasses?: DataClass[];
   } = {}
 ): Promise<SearchResponse> {
   // M4: registry check — deny before execution if capability not registered/executable
@@ -113,6 +117,15 @@ export async function webSearch(
       error: 'web.search: capability_denied by registry',
     };
   }
+
+  // M5 L1: AWAIT shadow candidate resolution before execution — append attempt completes first.
+  const shadowResolution = await resolveAndRecordShadow({
+    capability_id:     'web.search',
+    conversation_id:   opts.conversationId ?? null,
+    web_search_status: _sessionStatus,
+    request_id:        opts.requestId ?? null,
+    data_classes:      opts.dataClasses ?? ['public'],
+  }).catch(() => null);
 
   await initToolDB();
 
@@ -188,6 +201,11 @@ export async function webSearch(
     const resultSummary = `${results.length} result${results.length !== 1 ? 's' : ''} · "${query.trim()}"`;
     await logToolComplete(callId, resultSummary);
     _sessionStatus = 'operational';
+
+    // M5 L4: append-only shadow comparison after successful execution — awaited.
+    if (shadowResolution) {
+      await recordShadowComparison(shadowResolution, 'brave_resolver', opts.conversationId ?? null).catch(() => {});
+    }
 
     return { query, results, duration_ms: Date.now() - start, callId };
   } catch (e) {

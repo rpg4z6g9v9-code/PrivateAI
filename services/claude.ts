@@ -52,4 +52,10 @@ export interface AIRouteParams {
   onToken?: (token: string) => void; // streaming callback — local route only
   toolContext?: string;  // structured tool results injected for this turn
   signal?: AbortSignal;  // cancellation — abort() stops stream and prevents cloud fallback
+  /** M5: request identity from sendOrchestration — threads through to shadow resolution record. */
+  requestId?: string;
+  /** M5: M2-classified data classes for the outbound payload — threaded from PayloadClassification.unionClasses. */
+  dataClasses?: string[];
+  /** M5: conversation context — threaded to shadow comparison record. */
+  conversationId?: string;
 }

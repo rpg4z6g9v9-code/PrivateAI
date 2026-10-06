@@ -404,7 +404,7 @@ describe('KC-4 INVERTED — Sensitive/protected summarize contained (executable)
 describe('KC-5 UNCHANGED — Tools execute before authorization (transitional)', () => {
   it('structural: tools still execute before routeAI in orchestration', () => {
     const src = readFileSync('services/sendOrchestration.ts', 'utf8');
-    const macToolLine = src.indexOf('buildReadOnlyMacToolContext(text)');
+    const macToolLine = src.indexOf('buildReadOnlyMacToolContext(text,');
     const routeAILine = src.indexOf('routeAI(routeParams)');
     assert.ok(macToolLine > 0 && macToolLine < routeAILine,
       'TRANSITIONAL: Mac tools still execute before routeAI authorization');
@@ -687,5 +687,94 @@ describe('Voice transcription boundary (Unknown #6 — RESOLVED AS BOUNDARY FIND
     const voiceM = readFileSync('node_modules/@react-native-voice/voice/ios/Voice/Voice.m', 'utf8');
     assert.ok(!voiceM.includes('requiresOnDeviceRecognition'),
       'requiresOnDeviceRecognition not set — network-capable, not guaranteed on-device');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════
+//  SYSTEM DIAGNOSTIC SEARCH — M2 GATESEARCH CONTAINMENT
+// ══════════════════════════════════════════════════════════════════
+
+describe('System diagnostic search — M2 gateSearch containment', () => {
+  it('protected diagnostic query → classifyPayload → gateSearch blocks', async () => {
+    const classification = await classifyPayload({
+      currentText: 'sk-ant-api01-AAAAAAAAAAAAAAAAAAAAAA',  // protected API key
+      messages: [],
+      fetchCredential: async () => null,
+    });
+
+    assert.ok(classification.isProtected, 'API key must classify as protected');
+
+    const gate = gateSearch(classification);
+    assert.equal(gate.action, 'block_search', 'gateSearch must block protected classification');
+    assert.ok(gate.reason, 'gateSearch must provide reason');
+  });
+
+  it('sensitive diagnostic query → classifyPayload → gateSearch blocks', async () => {
+    const classification = await classifyPayload({
+      currentText: 'my credit card is 4532015112830366',  // financial PII
+      messages: [],
+      fetchCredential: async () => null,
+    });
+
+    assert.ok(classification.isSensitive, 'credit card must classify as sensitive');
+
+    const gate = gateSearch(classification);
+    assert.equal(gate.action, 'block_search', 'gateSearch must block sensitive classification');
+  });
+
+  it('public diagnostic query → classifyPayload → gateSearch allows', async () => {
+    const classification = await classifyPayload({
+      currentText: 'what is the weather today',
+      messages: [],
+      fetchCredential: async () => null,
+    });
+
+    assert.ok(!classification.isProtected, 'public text must not be protected');
+    assert.ok(!classification.isSensitive, 'public text must not be sensitive');
+
+    const gate = gateSearch(classification);
+    assert.equal(gate.action, 'allow_search', 'gateSearch must allow public classification');
+  });
+
+  it('ZERO Brave egress when protected diagnostic query blocks at gateSearch', async () => {
+    egress.clear();
+
+    // Simulate system diagnostic search logic: classify → gate → if blocked, zero webSearch
+    const classification = await classifyPayload({
+      currentText: 'sk-ant-api01-AAAAAAAAAAAAAAAAAAAAAA',
+      messages: [],
+      fetchCredential: async () => null,
+    });
+
+    const gate = gateSearch(classification);
+
+    if (gate.action === 'block_search') {
+      // System diagnostic search returns error and skips webSearch — zero egress
+      assert.equal(gate.action, 'block_search');
+    } else {
+      // This path should not be reached for protected queries
+      throw new Error('protected query must be blocked by gateSearch');
+    }
+
+    // Verify no Brave calls were made
+    assert.equal(egress.toHost('api.search.brave.com').length, 0,
+      'ZERO Brave egress when gateSearch blocks');
+  });
+
+  it('system.tsx implements gateSearch block logic (structural)', () => {
+    const src = readFileSync('app/(tabs)/system.tsx', 'utf8');
+    const doSearchIdx = src.indexOf('const doSearch');
+    assert.ok(doSearchIdx !== -1, 'doSearch callback exists in system.tsx');
+
+    const doSearchBlock = src.slice(doSearchIdx, doSearchIdx + 2000);
+
+    assert.ok(doSearchBlock.includes('gateSearch('),
+      'system diagnostic search calls gateSearch');
+
+    assert.ok(doSearchBlock.includes("searchGate.action === 'block_search'"),
+      'system diagnostic search checks for block_search action');
+
+    assert.ok(doSearchBlock.includes('setSearchError(searchGate.reason)'),
+      'system diagnostic search surfaces error when blocked');
   });
 });

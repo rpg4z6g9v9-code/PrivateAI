@@ -1,5 +1,7 @@
 import { providerGatewayFetch } from './providerGateway';
-import { gatewayToolCapabilityId, checkCapabilityOrDeny } from './controlPlane/registry';
+import { gatewayToolCapabilityId, checkCapabilityOrDeny, lookupProvidersByCapability } from './controlPlane/registry';
+import { resolveAndRecordShadow, recordShadowComparison } from './controlPlane/candidateResolution';
+import type { DataClass } from './controlPlane/types';
 
 export type ReadOnlyMacTool =
   | 'ollama.status'
@@ -310,6 +312,7 @@ function formatToolResult(
 
 async function runTool(
   tool: ReadOnlyMacTool,
+  opts: { requestId?: string; dataClasses?: DataClass[] } = {},
   timeoutMs = tool.startsWith('github.') ? 15000 : 7000
 ): Promise<ToolRunResponse> {
   // M4: registry check — deny before contacting gateway
@@ -318,6 +321,13 @@ async function runTool(
   if (!allowed.allowed) {
     return { tool, error: `registry_denied: ${capId ?? 'unregistered_capability'}` };
   }
+
+  // M5 L1: AWAIT shadow candidate resolution before execution — append attempt completes first.
+  const shadowResolution = await resolveAndRecordShadow({
+    capability_id: capId ?? tool,
+    data_classes:  opts.dataClasses ?? ['public'],
+    request_id:    opts.requestId ?? null,
+  }).catch(() => null);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -341,6 +351,14 @@ async function runTool(
       };
     }
 
+    // M5 L4: append-only shadow comparison after successful tool execution
+    // Use canonical M4 ProviderDescriptor ID from registry.
+    if (shadowResolution) {
+      const capId = gatewayToolCapabilityId(tool);
+      const actualProvider = lookupProvidersByCapability(capId ?? tool)[0]?.id ?? (capId ?? tool);
+      await recordShadowComparison(shadowResolution, actualProvider, null).catch(() => {});
+    }
+
     return data;
   } catch (error) {
     return {
@@ -353,16 +371,18 @@ async function runTool(
 }
 
 export async function buildReadOnlyMacToolContext(
-  userText: string
+  userText: string,
+  opts: { requestId?: string; dataClasses?: DataClass[] } = {},
 ): Promise<string | undefined> {
   const tools = detectTools(userText);
 
   if (tools.length === 0) return undefined;
 
+  // L2: consume caller-supplied M2 PayloadClassification.unionClasses — not rebuilt locally.
   const blocks: string[] = [];
 
   for (const tool of tools) {
-    const response = await runTool(tool);
+    const response = await runTool(tool, { requestId: opts.requestId, dataClasses: opts.dataClasses ?? ['public'] });
 
     if (response.error) {
       blocks.push(

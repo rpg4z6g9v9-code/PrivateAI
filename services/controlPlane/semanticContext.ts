@@ -9,14 +9,16 @@
  */
 
 import { classifyPayload, type CredentialFetcher, type PayloadClassification } from '@/services/controlPlane/classifier';
+import type { DataClass } from '@/services/controlPlane/types';
 
 export interface SemanticContextParams {
   text: string;
   messageId: string;
   conversationId: string;
+  requestId?: string;
   fetchCredential: CredentialFetcher;
-  embedUserMessage: (content: string, messageId: string, conversationId: string) => void;
-  findRelevantNodes: (text: string) => Promise<string[]>;
+  embedUserMessage: (content: string, messageId: string, conversationId: string, requestId?: string, dataClasses?: DataClass[]) => void;
+  findRelevantNodes: (text: string, requestId?: string, dataClasses?: DataClass[]) => Promise<string[]>;
 }
 
 export interface SemanticContextResult {
@@ -32,7 +34,7 @@ export interface SemanticContextResult {
 export async function gateSemanticContext(
   params: SemanticContextParams
 ): Promise<SemanticContextResult> {
-  const { text, messageId, conversationId, fetchCredential, embedUserMessage, findRelevantNodes } = params;
+  const { text, messageId, conversationId, requestId, fetchCredential, embedUserMessage, findRelevantNodes } = params;
 
   const classification = await classifyPayload({
     currentText: text,
@@ -48,11 +50,13 @@ export async function gateSemanticContext(
     };
   }
 
-  embedUserMessage(text, messageId, conversationId);
+  // L2: pass M2 PayloadClassification.unionClasses to both callbacks — not rebuilt locally.
+  // L6: pass requestId so embed and retrieval resolutions share the same request_id.
+  embedUserMessage(text, messageId, conversationId, requestId, classification.unionClasses);
 
   return {
     classification,
     embeddingCalled: true,
-    retrievalPromise: findRelevantNodes(text).catch(() => [] as string[]),
+    retrievalPromise: findRelevantNodes(text, requestId, classification.unionClasses).catch(() => [] as string[]),
   };
 }

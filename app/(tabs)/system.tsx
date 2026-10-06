@@ -43,6 +43,10 @@ import {
   revokeTrustedHost,
 } from '@/services/controlPlane/trustedHosts';
 import type { TrustedHostConfig } from '@/services/controlPlane/types';
+import { classifyPayload, type CredentialFetcher } from '@/services/controlPlane/classifier';
+import { gateSearch } from '@/services/controlPlane/interimBoundaryGate';
+import { mintRequestId } from '@/services/controlPlane/identifiers';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const FONT = 'SpaceMono-Regular';
 const VERSION_TAG = 'stable-websearch-gateway-v2';
@@ -172,8 +176,26 @@ export default function SystemScreen() {
     setSearchResults(null);
     setSearchError(null);
 
-    const res = await webSearch(q);
+    // L6: mint requestId at the diagnostic-search user-action boundary.
+    const requestId = mintRequestId();
+    const fetchCred: CredentialFetcher = async (storageType, key) => {
+      if (storageType === 'async') return AsyncStorage.getItem(key);
+      const secureStorage = (await import('@/services/secureStorage')).default;
+      return secureStorage.getItem(key);
+    };
+    // L2: classify actual search text via M2; never default to ['public'].
+    const classification = await classifyPayload({ currentText: q, messages: [], fetchCredential: fetchCred });
+
+    // M2: gate search on sensitivity/protected status — use existing M2 interim boundary gate.
+    const searchGate = gateSearch(classification);
     setSearching(false);
+
+    if (searchGate.action === 'block_search') {
+      setSearchError(searchGate.reason);
+      return;
+    }
+
+    const res = await webSearch(q, { requestId, dataClasses: classification.unionClasses });
 
     if (res.error) {
       setSearchError(res.error);

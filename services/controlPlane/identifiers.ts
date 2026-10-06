@@ -8,7 +8,7 @@
  */
 
 import type {
-  SessionId, RequestId, DecisionId,
+  SessionId, RequestId, ResolutionId, DecisionId,
   ConversationRef, MessageRef,
 } from './types';
 
@@ -27,6 +27,10 @@ export function getSessionId(): SessionId {
 
 export function mintRequestId(): RequestId {
   return mint('req') as RequestId;
+}
+
+export function mintResolutionId(): ResolutionId {
+  return mint('res') as ResolutionId;
 }
 
 export function mintDecisionId(): DecisionId {
