@@ -1,5 +1,6 @@
 /**
  * M2 Classification Expansion & Interim Containment Tests
+ * Includes M2 D7 Representation validation tests
  *
  * Command:
  *   node --experimental-transform-types --no-warnings \
@@ -7,7 +8,7 @@
  *        --test tests/m2/run.test.mjs
  */
 
-import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
+import { describe, it, before, after, beforeEach, afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
@@ -778,3 +779,10 @@ describe('System diagnostic search — M2 gateSearch containment', () => {
       'system diagnostic search surfaces error when blocked');
   });
 });
+
+// ══════════════════════════════════════════════════════════════════
+//  M2 D7 REPRESENTATION VALIDATION (Production-Backed)
+// ══════════════════════════════════════════════════════════════════
+
+// Import and run D7 representation tests
+await import('./d7-representation.test.mjs');

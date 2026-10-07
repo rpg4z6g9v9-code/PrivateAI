@@ -66,8 +66,7 @@ const PROTECTED_PATTERNS: Array<{ pattern: RegExp; detector: string }> = [
   // Password assignments
   { pattern: /(?:password|passwd|pwd)\s*[:=]\s*['"][^'"]{8,}['"]/gi, detector: 'password_assignment' },
   { pattern: /(?:password|passwd|pwd)\s*[:=]\s*[^\s'"]{8,}/gi, detector: 'password_value' },
-  // Private key blocks — capture complete blocks from BEGIN to matching END
-  { pattern: /-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END \1PRIVATE KEY-----/g, detector: 'private_key_block' },
+  // NOTE: Private key blocks handled separately via scanPrivateKeys() due to complexity of overlapping BEGIN/END
 ];
 
 // Stored credential keys the app uses (key names only, never values).
@@ -79,8 +78,66 @@ const APP_CREDENTIAL_KEYS = [
 
 export type CredentialFetcher = (storageType: 'async' | 'secure', key: string) => Promise<string | null>;
 
+// Scan for private key blocks: well-formed complete blocks and incomplete/truncated markers
+// Uses explicit parsing instead of regex to correctly handle overlapping BEGIN/END markers
+function scanPrivateKeys(text: string, segment: PayloadSegmentType, index?: number): ProtectedSpan[] {
+  const spans: ProtectedSpan[] = [];
+  const beginRegex = /-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/g;
+
+  let beginMatch: RegExpExecArray | null;
+  while ((beginMatch = beginRegex.exec(text)) !== null) {
+    const beginOffset = beginMatch.index;
+    const beginLength = beginMatch[0].length;
+    const keyType = beginMatch[1]; // Captured group: "RSA ", "EC ", etc., or undefined for plain PRIVATE KEY
+
+    // Look for the matching END marker
+    const searchStart = beginOffset + beginLength;
+    const endPattern = new RegExp(`-----END ${keyType ?? ''}PRIVATE KEY-----`);
+    const remainingFromBegin = text.substring(searchStart);
+
+    // Find both the next END (of any type) and next BEGIN
+    const nextEndMatch = remainingFromBegin.match(endPattern);
+    const nextBeginMatch = remainingFromBegin.match(/-----BEGIN /);
+
+    // Check if END found before BEGIN (well-formed complete block)
+    const endIndex = nextEndMatch?.index ?? -1;
+    const beginIndex = nextBeginMatch?.index ?? -1;
+
+    if (endIndex >= 0 && (beginIndex < 0 || endIndex < beginIndex)) {
+      // Found matching END before any new BEGIN — well-formed complete block
+      const endOffset = searchStart + endIndex;
+      const endLength = nextEndMatch![0].length;
+      const spanLength = endOffset - beginOffset + endLength;
+
+      spans.push({
+        segment,
+        index,
+        detector: 'private_key_block',
+        offset: beginOffset,
+        length: spanLength,
+      });
+    } else {
+      // No matching END before next BEGIN (or no END at all) — incomplete/truncated
+      spans.push({
+        segment,
+        index,
+        detector: 'private_key_incomplete',
+        offset: beginOffset,
+        length: beginLength,
+      });
+    }
+  }
+
+  return spans;
+}
+
 function detectProtectedPatterns(text: string, segment: PayloadSegmentType, index?: number): ProtectedSpan[] {
   const spans: ProtectedSpan[] = [];
+
+  // Scan for private keys using explicit parser (handles overlapping BEGIN/END)
+  spans.push(...scanPrivateKeys(text, segment, index));
+
+  // Scan for other patterns using regex
   for (const { pattern, detector } of PROTECTED_PATTERNS) {
     // Reset regex state for global patterns
     const rx = new RegExp(pattern.source, pattern.flags);
@@ -89,6 +146,7 @@ function detectProtectedPatterns(text: string, segment: PayloadSegmentType, inde
       spans.push({ segment, index, detector, offset: match.index, length: match[0].length });
     }
   }
+
   return spans;
 }
 
@@ -102,12 +160,13 @@ async function detectStoredCredentials(
   for (const { storageType, key, detector } of APP_CREDENTIAL_KEYS) {
     const value = await fetchCredential(storageType, key);
     if (value && value.length > 0 && text.includes(value)) {
-      // Escape special regex characters and find ALL occurrences
-      const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const rx = new RegExp(escaped, 'g');
-      let match: RegExpExecArray | null;
-      while ((match = rx.exec(text)) !== null) {
-        spans.push({ segment, index, detector, offset: match.index, length: match[0].length });
+      // Literal repeated indexOf: find ALL occurrences without regex interpretation
+      let start = 0;
+      while (true) {
+        const idx = text.indexOf(value, start);
+        if (idx < 0) break;
+        spans.push({ segment, index, detector, offset: idx, length: value.length });
+        start = idx + value.length;
       }
     }
   }
