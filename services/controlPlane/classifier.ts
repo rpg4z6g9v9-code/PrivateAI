@@ -66,8 +66,8 @@ const PROTECTED_PATTERNS: Array<{ pattern: RegExp; detector: string }> = [
   // Password assignments
   { pattern: /(?:password|passwd|pwd)\s*[:=]\s*['"][^'"]{8,}['"]/gi, detector: 'password_assignment' },
   { pattern: /(?:password|passwd|pwd)\s*[:=]\s*[^\s'"]{8,}/gi, detector: 'password_value' },
-  // Private key blocks
-  { pattern: /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/g, detector: 'private_key_block' },
+  // Private key blocks — capture complete blocks from BEGIN to matching END
+  { pattern: /-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END \1PRIVATE KEY-----/g, detector: 'private_key_block' },
 ];
 
 // Stored credential keys the app uses (key names only, never values).
@@ -102,8 +102,13 @@ async function detectStoredCredentials(
   for (const { storageType, key, detector } of APP_CREDENTIAL_KEYS) {
     const value = await fetchCredential(storageType, key);
     if (value && value.length > 0 && text.includes(value)) {
-      const idx = text.indexOf(value);
-      spans.push({ segment, index, detector, offset: idx, length: value.length });
+      // Escape special regex characters and find ALL occurrences
+      const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const rx = new RegExp(escaped, 'g');
+      let match: RegExpExecArray | null;
+      while ((match = rx.exec(text)) !== null) {
+        spans.push({ segment, index, detector, offset: match.index, length: match[0].length });
+      }
     }
   }
   return spans;

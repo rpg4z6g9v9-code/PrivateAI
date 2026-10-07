@@ -136,7 +136,7 @@ describe('Protected detection corpus', () => {
     ['fake GitHub PAT', 'Token: ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'],
     ['fake bearer token', 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.test.sig'],
     ['fake password assignment', 'password="SuperSecret123!"'],
-    ['fake private key', '-----BEGIN RSA PRIVATE KEY-----\nMIIE...'],
+    ['fake private key', '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA1234567890\n-----END RSA PRIVATE KEY-----'],
     ['fake Brave key', 'BSAabcdefghij1234567890'],
   ];
 
